@@ -21,10 +21,15 @@ def validate_url(url: str) -> tuple[str, str, str]:
     if url.startswith('//'): url = 'https:' + url
     p = urlsplit(url)
     host = p.hostname or ''
-    if p.scheme != 'https' or p.username or p.password or p.port not in (None,443):
-        raise ValueError('仅允许 HTTPS 图片地址')
+    if p.scheme not in ('http', 'https') or p.username or p.password:
+        raise ValueError('图片地址必须是无账号信息的 HTTP/HTTPS 地址')
+    allowed_port = 80 if p.scheme == 'http' else 443
+    if p.port not in (None, allowed_port):
+        raise ValueError('图片地址不允许使用非标准端口')
     if not any(host == d or host.endswith('.'+d) for d in ('alicdn.com','tbcdn.cn','taobaocdn.com')):
         raise ValueError('图片域名不在阿里图片 CDN 白名单')
+    # Legacy CDN HTTP URLs are upgraded locally; never send an HTTP request.
+    # PinnedHTTPS always connects to port 443 with certificate verification.
     addresses = {r[4][0] for r in socket.getaddrinfo(host,443,type=socket.SOCK_STREAM)}
     if not addresses or any(not ipaddress.ip_address(a).is_global for a in addresses):
         raise ValueError('禁止访问本地或保留网络地址')

@@ -185,3 +185,41 @@ def test_account_uses_safe_login_result(client):
     response=client.get('/api/accounts')
     assert '字符编码错误' in response.text
     assert 'DO_NOT_EXPOSE' not in response.text
+
+@pytest.mark.parametrize('url',[
+    'http://img.alicdn.com/item.jpg?size=200',
+    'http://img.alicdn.com:80/item.jpg?size=200',
+    '//img.alicdn.com/item.jpg?size=200',
+    'https://img.alicdn.com/item.jpg?size=200',
+])
+def test_cdn_legacy_urls_use_https_transport(url,monkeypatch):
+    import socket
+    from webapp import images
+    # Use a globally routable fixture address for public-IP validation.
+    monkeypatch.setattr(socket,'getaddrinfo',lambda *a,**k:[(socket.AF_INET,socket.SOCK_STREAM,6,'',('8.8.8.8',443))])
+    calls=[]
+    class Response:
+        status=200
+        def getheader(self,key): return 'image/png'
+        def read1(self,n): return b''
+    class Connection:
+        def __init__(self,host,address): calls.append((host,address))
+        def request(self,method,path,headers): calls.append((method,path))
+        def getresponse(self): return Response()
+        def close(self): return None
+    monkeypatch.setattr(images,'PinnedHTTPS',Connection)
+    images.fetch_image(url)
+    assert calls==[('img.alicdn.com','8.8.8.8'),('GET','/item.jpg?size=200')]
+
+@pytest.mark.parametrize('url',[
+    'http://evil.com/a','http://img.alicdn.com.evil.com/a',
+    'http://img.alicdn.com:8080/a','http://user:pass@img.alicdn.com/a',
+    'https://img.alicdn.com:80/a','ftp://img.alicdn.com/a',
+])
+def test_http_upgrade_does_not_relax_url_security(url):
+    with pytest.raises(ValueError): validate_url(url)
+
+def test_http_cdn_private_dns_still_rejected(monkeypatch):
+    import socket
+    monkeypatch.setattr(socket,'getaddrinfo',lambda *a,**k:[(socket.AF_INET,socket.SOCK_STREAM,6,'',('127.0.0.1',443))])
+    with pytest.raises(ValueError,match='本地或保留'): validate_url('http://img.alicdn.com/a')
