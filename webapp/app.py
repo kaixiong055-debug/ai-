@@ -5,7 +5,6 @@ import csv
 import json
 import io
 import os
-import zipfile
 import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -18,6 +17,7 @@ from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image
 from . import images
+from .exporter import write_archive
 from .store import Store
 from .tasks import TaskManager, ROOT
 from .publishers import Draft, PUBLISHERS
@@ -186,15 +186,11 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         fd, filename = tempfile.mkstemp(suffix='.zip',dir=export_dir)
         os.close(fd)
         archive = Path(filename)
-        with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
-            z.writestr('products.csv',csv_data(rows))
-            added=set()
-            for p in rows:
-                for image in store.gallery(p['id']):
-                    if image.get('path') and image['path'] not in added:
-                        path=(store.root/image['path']).resolve()
-                        if path.is_relative_to(store.root/'images') and path.is_file():
-                            z.write(path,image['path']); added.add(image['path'])
+        try:
+            write_archive(archive,store,rows)
+        except Exception:
+            archive.unlink(missing_ok=True)
+            raise
         return FileResponse(archive,media_type='application/zip',filename='products.zip',background=BackgroundTask(archive.unlink,missing_ok=True))
     @app.get('/api/drafts')
     def drafts() -> list[dict]: return store.drafts()

@@ -38,7 +38,8 @@ def test_gallery_download_selection_and_export(tmp_path,monkeypatch):
         assert updated[0]['status']=='pending' and updated[1]['status']=='downloaded'
         assert c.get(f"/api/gallery/{gallery[1]['id']}").content==b.getvalue()
         z=zipfile.ZipFile(io.BytesIO(c.post('/api/export/zip',json={'ids':[pid]}).content))
-        assert len(z.namelist())==2
+        assert len([n for n in z.namelist() if n.endswith('.png')])==1
+        assert any(n.endswith('/图片清单.csv') for n in z.namelist())
         c.post('/api/images/download',json={'ids':[pid]});app.state.tasks.thread.join(5)
         assert all(i['status']=='downloaded' for i in c.get(f'/api/products/{pid}').json()['gallery'])
         # Same bytes are stored once per product, even when URLs differ.

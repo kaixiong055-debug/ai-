@@ -27,7 +27,7 @@ def test_export_draft_delete(client):
     pid = seed(client)
     assert '测试商品' in client.post('/api/export/csv',json={'ids':[pid]}).content.decode('utf-8-sig')
     r=client.post('/api/export/zip',json={'ids':[pid]})
-    assert 'products.csv' in zipfile.ZipFile(io.BytesIO(r.content)).namelist()
+    assert any(n.endswith('/商品介绍.txt') for n in zipfile.ZipFile(io.BytesIO(r.content)).namelist())
     assert client.post('/api/drafts',json={'ids':[pid]}).status_code == 200
     assert len(client.get('/api/drafts').json()) == 1
     assert client.post('/api/publish/taobao',json={}).status_code == 409
@@ -62,7 +62,8 @@ def test_image_download_and_zip(client, monkeypatch):
     assert p['image_status']=='downloaded'
     assert client.get(f'/api/images/{pid}').content==b.getvalue()
     archive=zipfile.ZipFile(io.BytesIO(client.post('/api/export/zip',json={'ids':[pid]}).content))
-    assert len(archive.namelist())==2
+    assert len([n for n in archive.namelist() if n.endswith('.png')])==1
+    assert any(n.endswith('/商品信息.json') for n in archive.namelist())
     first=p['image_path']
     client.post('/api/images/download',json={'ids':[pid]}); client.app.state.tasks.thread.join(5)
     assert client.get('/api/products').json()['items'][0]['image_path']==first
@@ -126,7 +127,7 @@ def test_task_stop_terminates_process(client,monkeypatch,tmp_path):
     assert client.app.state.tasks.proc.poll() is not None
     assert client.get('/api/tasks').json()[0]['status']=='stopped'
 
-def test_crawl_import_auto_download(client,monkeypatch,tmp_path):
+def test_crawl_import_does_not_download(client,monkeypatch,tmp_path):
     import sys,json
     import webapp.tasks as tasks
     from webapp import images
@@ -142,7 +143,8 @@ def test_crawl_import_auto_download(client,monkeypatch,tmp_path):
     monkeypatch.setattr(tasks,'launch',fake_worker)
     client.post('/api/tasks',json={'keywords':['关键词'],'platforms':['taobao'],'pages':1})
     client.app.state.tasks.thread.join(5)
-    assert client.get('/api/products').json()['items'][0]['image_status']=='downloaded'
+    assert client.get('/api/products').json()['items'][0]['image_status']=='pending'
+    assert not (client.app.state.store.root/'images').exists()
     assert client.get('/api/tasks').json()[0]['counts']['taobao']==1
 
 def test_child_process_forces_utf8(monkeypatch):
@@ -259,3 +261,61 @@ def test_stop_preserves_collected_detail_results(client,monkeypatch,tmp_path):
     products=client.get('/api/products').json()['items']
     assert products[0]['item_id']=='partial'
     assert len(client.app.state.store.gallery(products[0]['id']))==2
+
+def test_detail_collection_does_not_download(client,monkeypatch,tmp_path):
+    import sys,json
+    import webapp.tasks as tasks
+    from webapp import images
+    def unexpected(*args,**kwargs): raise AssertionError('采集不能下载')
+    monkeypatch.setattr(images,'fetch_image',unexpected)
+    (tmp_path/'state').mkdir();(tmp_path/'state'/'taobao_state.json').write_text('{}',encoding='utf-8')
+    monkeypatch.setattr(tasks,'ROOT',tmp_path)
+    pid=seed(client)
+    original=tasks.launch
+    payload={'detail_status':'collected','description':'介绍','gallery':['https://img.alicdn.com/a','https://img.alicdn.com/b']}
+    def worker(args):
+        return original([sys.executable,'-c','import pathlib,sys;pathlib.Path(sys.argv[1]).write_text(sys.argv[2],encoding="utf-8")',args[4],json.dumps(payload)])
+    monkeypatch.setattr(tasks,'launch',worker)
+    client.post('/api/details/collect',json={'ids':[pid]});client.app.state.tasks.thread.join(5)
+    assert client.get('/api/tasks').json()[0]['status']=='completed'
+    gallery=client.get(f'/api/products/{pid}').json()['gallery']
+    assert len(gallery)==2 and all(i['status']=='pending' for i in gallery)
+    assert not (client.app.state.store.root/'images').exists()
+
+def test_export_product_folders_and_description(client,monkeypatch):
+    from PIL import Image
+    from webapp import images
+    b=io.BytesIO();Image.new('RGB',(5,5),'blue').save(b,format='PNG')
+    monkeypatch.setattr(images,'fetch_image',lambda *a,**k:b.getvalue())
+    pid=client.app.state.store.upsert({'platform':'xianyu','item_id':'42','title':'机械键盘','description':'原始商品介绍\n支持热插拔','image_url':'https://img.alicdn.com/a','gallery':['https://img.alicdn.com/b']},'数码')
+    gallery=client.app.state.store.gallery(pid)
+    client.post('/api/gallery/download',json={'ids':[gallery[0]['id']]});client.app.state.tasks.thread.join(5)
+    def no_network(*args,**kwargs): raise AssertionError('导出不能下载图片')
+    monkeypatch.setattr(images,'fetch_image',no_network)
+    r=client.post('/api/export/zip',json={'ids':[pid]})
+    z=zipfile.ZipFile(io.BytesIO(r.content))
+    names=z.namelist();prefix='闲鱼/数码/机械键盘/'
+    assert all(n.startswith(prefix) for n in names)
+    assert prefix+'001_封面.png' in names
+    assert '支持热插拔' in z.read(prefix+'商品介绍.txt').decode('utf-8-sig')
+    assert '未下载' in z.read(prefix+'图片清单.csv').decode('utf-8-sig')
+    assert len([n for n in names if n.endswith('.png')])==1
+    assert client.app.state.store.gallery(pid)[1]['status']=='pending'
+
+def test_export_unsafe_and_duplicate_names(client):
+    ids=[]
+    for item_id in ['1','2']:
+        ids.append(client.app.state.store.upsert({'platform':'taobao','item_id':item_id,'title':'../CON:商品?'},'../类别'))
+    z=zipfile.ZipFile(io.BytesIO(client.post('/api/export/zip',json={'ids':ids}).content))
+    paths=z.namelist()
+    assert len(paths)==len(set(paths))
+    assert len([p for p in paths if p.endswith('商品介绍.txt')])==2
+    assert all(not p.startswith('/') and '..' not in p.split('/') and ':' not in p for p in paths)
+
+def test_export_missing_local_file_is_honest(client):
+    pid=client.app.state.store.upsert({'platform':'taobao','item_id':'missing','title':'缺图','image_url':'https://img.alicdn.com/a'},'关键词')
+    with client.app.state.store.connect() as c:
+        c.execute("UPDATE product_images SET status='downloaded',path=NULL WHERE product_id=?",(pid,))
+    z=zipfile.ZipFile(io.BytesIO(client.post('/api/export/zip',json={'ids':[pid]}).content))
+    manifest=next(p for p in z.namelist() if p.endswith('图片清单.csv'))
+    assert '本地文件缺失' in z.read(manifest).decode('utf-8-sig')

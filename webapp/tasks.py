@@ -94,7 +94,7 @@ class TaskManager:
                         self.store.upsert(p,p['keyword'])
                         if p.get('detail_error'):
                             self.active['failures'].append({'item_id':p['item_id'],'error':p['detail_error']})
-                    self.download_product(p,payload.get('image_ids'))
+                    if kind=='images': self.download_product(p,payload.get('image_ids'))
                     self.save(completed=self.active['completed']+1)
                     if kind=='details' and self.active['completed']<self.active['total']: self.cancel.wait(4.5)
             else:
@@ -133,11 +133,9 @@ class TaskManager:
                         if result['success']:
                             for product in result['products']:
                                 if self.cancel.is_set(): break
-                                pid = self.store.upsert(product,keyword)
-                                saved = self.store.selected([pid])[0]
+                                self.store.upsert(product,keyword)
                                 if product.get('detail_status') in ('failed','pending') or product.get('detail_error'):
                                     self.active['failures'].append({'item_id':product['item_id'],'error':product.get('detail_error') or '图集尚未采集完成，请补采详情'})
-                                self.download_product(saved)
                             self.active['counts'][platform]=self.active['counts'].get(platform,0)+len(result['products'])
                             if not result['products']:
                                 self.active['failures'].append({'platform':platform,'keyword':keyword,'error':'返回零条商品，可能没有匹配结果或平台限制访问'})
