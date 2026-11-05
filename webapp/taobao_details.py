@@ -60,12 +60,13 @@ def parse_detail(payload: dict, item_id: str, request_id: str = '') -> dict | No
     if not images and not text: images,text=description_fields(item)
     for image in images: add(image,'detail')
     if not kinds: return None
-    return {'gallery':list(kinds),'image_kinds':kinds,'description':text,
+    return {**({'title':str(item['title'])[:200]} if item.get('title') else {}),'gallery':list(kinds),'image_kinds':kinds,'description':text,
             'detail_status':'collected' if images else 'partial',
             'detail_error':None if images else '已取得轮播/SKU 图片，但尚未取得详情长图；可补采重试'}
 
 
 def merge_result(found: dict, incoming: dict) -> None:
+    if incoming.get('title'): found['title']=incoming['title']
     found['gallery']=list(dict.fromkeys(found.get('gallery',[])+incoming['gallery']))
     kinds=found.setdefault('image_kinds',{})
     for url,kind in incoming['image_kinds'].items():

@@ -29,7 +29,7 @@ class Store:
             ''')
 
             columns={r[1] for r in c.execute('PRAGMA table_info(products)')}
-            for name, definition in [('description',"TEXT DEFAULT ''"),('detail_status',"TEXT DEFAULT 'pending'"),('detail_error','TEXT')]:
+            for name, definition in [('description',"TEXT DEFAULT ''"),('detail_status',"TEXT DEFAULT 'pending'"),('detail_error','TEXT'),('source_url',"TEXT DEFAULT ''"),('source_name',"TEXT DEFAULT ''")]:
                 if name not in columns: c.execute(f'ALTER TABLE products ADD COLUMN {name} {definition}')
             c.execute('''CREATE TABLE IF NOT EXISTS product_images (
                 id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL, url TEXT NOT NULL,
@@ -57,6 +57,10 @@ class Store:
         return c
 
     def upsert(self, p: dict[str, Any], keyword: str) -> int:
+        p=dict(p)
+        if not p.get('image_url') and p.get('gallery'):
+            candidates=[url for url in p['gallery'] if p.get('image_kinds',{}).get(url,'gallery')=='gallery']
+            p['image_url']=(candidates or p['gallery'])[0]
         with self.connect() as c:
             c.execute('''INSERT INTO products(platform,item_id,title,url,current_price,image_url,keyword,crawled_at)
               VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(platform,item_id) DO UPDATE SET
@@ -68,6 +72,8 @@ class Store:
             pid=c.execute('SELECT id FROM products WHERE platform=? AND item_id=?',(p['platform'],str(p['item_id']))).fetchone()[0]
             if 'detail_status' in p:
                 c.execute('UPDATE products SET detail_status=?,detail_error=? WHERE id=?',(p['detail_status'],p.get('detail_error'),pid))
+            for source in ('source_url','source_name'):
+                if source in p: c.execute(f'UPDATE products SET {source}=? WHERE id=?',(p[source],pid))
             if 'description' in p:
                 c.execute('UPDATE products SET description=? WHERE id=?',(p['description'],pid))
             urls=list(dict.fromkeys(([p['image_url']] if p.get('image_url') else [])+p.get('gallery',[])))

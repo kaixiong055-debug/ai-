@@ -61,13 +61,14 @@ def write_archive(archive: Path, store: Store, products: list[dict]) -> None:
                 manifest.append({'序号':index,'类型':KINDS.get(image['kind'],'商品图'),'状态':state,'文件名':filename,'来源地址':image['url'],'失败原因':error})
             info={'商品名称':product['title'],'来源平台':PLATFORMS.get(product['platform'],product['platform']),
                   '搜索关键词':product.get('keyword') or '', '分类依据':'搜索关键词，非平台官方类目',
+                  '来源页面':product.get('source_url') or '', '来源页面名称':product.get('source_name') or '',
                   '商品ID':product['item_id'],'售价':product.get('current_price'),'原始链接':product.get('url') or '',
                   '采集时间':product.get('crawled_at'),'详情采集状态':product.get('detail_status'),
                   '详情采集提示':product.get('detail_error'),'商品介绍':product.get('description') or '',
                   '图片':manifest}
             lines=[f'商品名称：{info["商品名称"]}',f'来源平台：{info["来源平台"]}',f'搜索关键词：{info["搜索关键词"]}',
                    f'分类依据：{info["分类依据"]}',f'商品 ID：{info["商品ID"]}',
-                   f'售价：{info["售价"] if info["售价"] is not None else "未获取"}',f'原始链接：{info["原始链接"]}',
+                   f'售价：{info["售价"] if info["售价"] is not None else "未获取"}',f'原始链接：{info["原始链接"]}',f'来源页面：{info["来源页面"]}',f'来源页面名称：{info["来源页面名称"]}',
                    f'采集时间：{info["采集时间"]}', '', '商品介绍：',info['商品介绍'] or '尚未获取到商品介绍，请先补采详情。',
                    '',f'已导出图片文件：{len(copied)}；已采集图片地址：{len(manifest)}。',
                    '导出不会自动下载图片；未下载、失败或缺失图片请查看图片清单。']

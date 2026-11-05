@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from typing import Literal
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from PIL import Image
@@ -22,6 +23,8 @@ from .store import Store
 from .tasks import TaskManager, ROOT
 from .publishers import Draft, PUBLISHERS
 from .login_worker import MESSAGES
+from .selection import import_links, page_link
+from .picker_session import PickerSession
 
 class Selection(BaseModel):
     ids: list[int] = Field(min_length=1,max_length=1000)
@@ -30,6 +33,21 @@ class Search(BaseModel):
     keywords: list[str] = Field(min_length=1,max_length=20)
     platforms: list[str] = Field(min_length=1,max_length=2)
     pages: int = Field(1,ge=1,le=20)
+
+
+class LinkImport(BaseModel):
+    urls: list[str] = Field(min_length=1,max_length=200)
+    keyword: str = Field('链接选品',min_length=1,max_length=100)
+
+class BrowserStart(BaseModel):
+    platform: Literal['taobao','xianyu']
+
+class BrowserCommand(BaseModel):
+    action: Literal['navigate','current','list','shop','save_login']
+    page: str = Field('',max_length=30)
+    url: str = Field('',max_length=2048)
+    rounds: int = Field(3,ge=1,le=10)
+    limit: int = Field(100,ge=1,le=200)
 
 
 def csv_data(rows: list[dict]) -> bytes:
@@ -48,12 +66,14 @@ def csv_data(rows: list[dict]) -> bytes:
 def create_app(data_dir: Path | None = None) -> FastAPI:
     store=Store(data_dir or Path(os.environ.get('PRODUCT_TOOL_DATA',ROOT/'data'/'webapp')))
     tasks=TaskManager(store)
+    picker=PickerSession(store.root)
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
         tasks.close()
+        picker.close()
     app=FastAPI(title='商品采集管理',docs_url=None,redoc_url=None,openapi_url=None,lifespan=lifespan)
-    app.state.store=store; app.state.tasks=tasks
+    app.state.store=store; app.state.tasks=tasks; app.state.picker=picker
     app.add_middleware(TrustedHostMiddleware,allowed_hosts=['127.0.0.1','localhost'])
     @app.middleware('http')
     async def local_guard(request: Request, call_next):
@@ -76,6 +96,43 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @app.get('/api/health')
     def health() -> dict:
         return {'app':'product-crawling-local','status':'ok'}
+    @app.post('/api/selection/links')
+    def add_links(body: LinkImport) -> dict:
+        try: return {'ids':import_links(store,body.urls,body.keyword),'message':'已加入商品库，尚未采集详情或下载图片'}
+        except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+    @app.get('/api/selection/browser')
+    def browser_status() -> dict: return picker.status()
+    @app.post('/api/selection/browser/open')
+    def browser_open(body: BrowserStart) -> dict:
+        try: return picker.start(body.platform)
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+    @app.post('/api/selection/browser/command')
+    def browser_command(body: BrowserCommand) -> dict:
+        try:
+            if body.action=='navigate': page_link(body.url)
+            return picker.send(body.model_dump())
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+    @app.post('/api/selection/browser/close')
+    def browser_close() -> dict:
+        picker.close();return picker.status()
+    @app.get('/api/selection/browser/preview')
+    def candidate_preview(url: str) -> Response:
+        candidate=next((c for c in picker.status()['candidates'] if c['url']==url),None)
+        if not candidate or not candidate.get('image_url'): raise HTTPException(404,'候选无预览图')
+        try:
+            data=images.fetch_image(candidate['image_url']);images.verify_image(data)
+            with Image.open(io.BytesIO(data)) as img:
+                img.thumbnail((300,300));out=io.BytesIO();img.convert('RGB').save(out,format='JPEG',quality=80)
+            return Response(out.getvalue(),media_type='image/jpeg',headers={'Cache-Control':'private, max-age=300'})
+        except (ValueError,OSError,http.client.HTTPException) as exc:
+            raise HTTPException(502,'候选预览不可用，仍可采集商品详情') from exc
+    @app.post('/api/selection/browser/import')
+    def browser_import(body: LinkImport) -> dict:
+        candidates=picker.status()['candidates']
+        allowed={c['url'] for c in candidates}
+        if any(url not in allowed for url in body.urls): raise HTTPException(422,'候选已更新，请刷新列表重新选择')
+        try: return {'ids':import_links(store,body.urls,body.keyword,candidates),'message':'已加入商品库；请勾选商品后采集详情，图片需单独下载'}
+        except ValueError as exc: raise HTTPException(422,str(exc)) from exc
     @app.get('/api/products')
     def products(q: str='',platform: str='',status: str='',page: int=Query(1,ge=1),size: int=Query(24,ge=1,le=100)) -> dict:
         return store.products(q,platform,status,page,size)

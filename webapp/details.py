@@ -35,7 +35,7 @@ def parse_detail(payload: dict, item_id: str) -> dict | None:
             value=normalize(value)
             if value not in urls and urlsplit(value).scheme=='https': urls.append(value)
     if not urls: return None
-    return {'gallery':urls,'description':str(item.get('desc') or item.get('description') or ''),
+    return {**({'title':str(item['title'])[:200]} if item.get('title') else {}),'gallery':urls,'description':str(item.get('desc') or item.get('description') or ''),
             'detail_status':'collected','detail_error':None}
 
 
