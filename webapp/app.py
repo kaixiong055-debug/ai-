@@ -1,5 +1,6 @@
 """Loopback-only management API; private files are never mounted."""
 from __future__ import annotations
+import http.client
 import csv
 import json
 import io
@@ -15,6 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from PIL import Image
+from . import images
 from .store import Store
 from .tasks import TaskManager, ROOT
 from .publishers import Draft, PUBLISHERS
@@ -76,6 +79,25 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @app.get('/api/products')
     def products(q: str='',platform: str='',status: str='',page: int=Query(1,ge=1),size: int=Query(24,ge=1,le=100)) -> dict:
         return store.products(q,platform,status,page,size)
+    @app.get('/api/products/{pid}')
+    def detail(pid: int) -> dict:
+        rows=store.selected([pid])
+        if not rows: raise HTTPException(404,'商品不存在')
+        return rows[0]
+    @app.get('/api/images/{pid}/preview')
+    def preview(pid: int) -> Response:
+        rows=store.selected([pid])
+        if not rows or not rows[0].get('image_url'): raise HTTPException(404,'没有主图地址')
+        try:
+            data=images.fetch_image(rows[0]['image_url'])
+            images.verify_image(data)
+            with Image.open(io.BytesIO(data)) as img:
+                img.thumbnail((480,480))
+                out=io.BytesIO()
+                img.convert('RGB').save(out,format='JPEG',quality=80)
+            return Response(out.getvalue(),media_type='image/jpeg',headers={'Cache-Control':'private, max-age=300'})
+        except (ValueError,OSError,http.client.HTTPException) as exc:
+            raise HTTPException(502,'预览暂不可用，可选择下载重试查看原因') from exc
     @app.post('/api/products/delete')
     def delete(selection: Selection) -> dict:
         store.delete(selection.ids); return {'ok':True}

@@ -223,3 +223,20 @@ def test_http_cdn_private_dns_still_rejected(monkeypatch):
     import socket
     monkeypatch.setattr(socket,'getaddrinfo',lambda *a,**k:[(socket.AF_INET,socket.SOCK_STREAM,6,'',('127.0.0.1',443))])
     with pytest.raises(ValueError,match='本地或保留'): validate_url('http://img.alicdn.com/a')
+
+def test_product_details_and_safe_preview(client,monkeypatch):
+    from PIL import Image
+    from webapp import images
+    b=io.BytesIO();Image.new('RGB',(30,20),'green').save(b,format='PNG')
+    monkeypatch.setattr(images,'fetch_image',lambda url:b.getvalue())
+    pid=client.app.state.store.upsert({'platform':'xianyu','item_id':'detail','title':'详情商品','image_url':'https://img.alicdn.com/a.png'},'关键词')
+    assert client.get(f'/api/products/{pid}').json()['title']=='详情商品'
+    assert client.get(f'/api/images/{pid}/preview').headers['content-type']=='image/jpeg'
+    assert client.get(f'/api/products/{pid}').json()['image_status']=='pending'
+    assert client.get('/api/products/999999').status_code==404
+
+def test_available_and_no_image_filters(client):
+    seed(client)
+    client.app.state.store.upsert({'platform':'xianyu','item_id':'available','title':'可下载','image_url':'https://img.alicdn.com/a.png'},'k')
+    assert client.get('/api/products?status=available').json()['total']==1
+    assert client.get('/api/products?status=unavailable').json()['total']==1

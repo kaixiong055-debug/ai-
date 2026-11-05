@@ -49,7 +49,9 @@ class Store:
         if q:
             where.append('(instr(title,?)>0 OR instr(keyword,?)>0 OR instr(item_id,?)>0)'); args.extend([q,q,q])
         if platform: where.append('platform=?'); args.append(platform)
-        if status: where.append('image_status=?'); args.append(status)
+        if status == 'available': where.append("COALESCE(image_url,'')<>'' AND image_status<>'downloaded'")
+        elif status == 'unavailable': where.append("COALESCE(image_url,'')='' AND image_status<>'downloaded'")
+        elif status: where.append('image_status=?'); args.append(status)
         sql = ' FROM products WHERE ' + ' AND '.join(where)
         with self.connect() as c:
             total = c.execute('SELECT count(*)'+sql,args).fetchone()[0]
