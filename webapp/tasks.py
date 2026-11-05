@@ -30,7 +30,9 @@ def terminate(proc: subprocess.Popen) -> None:
 
 
 def launch(args: list[str]) -> subprocess.Popen:
-    return subprocess.Popen(args,cwd=ROOT,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
+    child_env = os.environ.copy()
+    child_env.update(PYTHONIOENCODING='utf-8', PYTHONUTF8='1')
+    return subprocess.Popen(args,cwd=ROOT,env=child_env,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,
                             start_new_session=os.name!='nt')
 
 
@@ -43,6 +45,7 @@ class TaskManager:
         self.proc: subprocess.Popen | None=None
         self.thread: threading.Thread | None=None
         self.logins: dict[str,subprocess.Popen]={}
+        self.login_reports: dict[str,Path]={}
         for t in store.tasks():
             if t['status'] in ('running','stopping'):
                 t['status']='interrupted'; t['message']='上次服务已退出，任务中断'; store.save_task(t)
@@ -137,7 +140,11 @@ class TaskManager:
         with self.lock:
             if self.thread and self.thread.is_alive(): raise ValueError('采集或下载期间不能修改登录状态')
             if any(p.poll() is None for p in self.logins.values()): raise ValueError('已有登录窗口打开')
-            self.logins[platform]=launch([sys.executable,'scripts/login_helper.py',platform])
+            report = self.store.root / f'login-{platform}-{uuid.uuid4().hex}.json'
+            previous = self.login_reports.get(platform)
+            if previous: previous.unlink(missing_ok=True)
+            self.login_reports[platform] = report
+            self.logins[platform]=launch([sys.executable,'-m','webapp.login_worker',platform,str(report)])
 
     def close(self) -> None:
         self.stop()

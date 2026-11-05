@@ -144,3 +144,44 @@ def test_crawl_import_auto_download(client,monkeypatch,tmp_path):
     client.app.state.tasks.thread.join(5)
     assert client.get('/api/products').json()['items'][0]['image_status']=='downloaded'
     assert client.get('/api/tasks').json()[0]['counts']['taobao']==1
+
+def test_child_process_forces_utf8(monkeypatch):
+    import webapp.tasks as tasks
+    captured={}
+    def spawn(args,**kwargs):
+        captured.update(kwargs)
+        return object()
+    monkeypatch.setattr(tasks.subprocess,'Popen',spawn)
+    tasks.launch(['python','helper.py'])
+    assert captured['env']['PYTHONIOENCODING']=='utf-8'
+    assert captured['env']['PYTHONUTF8']=='1'
+
+def test_login_diagnostics_do_not_expose_exception(tmp_path):
+    from webapp.login_worker import run_login
+    def fail(): raise RuntimeError('secret credential must not escape')
+    assert run_login(fail,tmp_path/'state.json')=='unexpected_error'
+
+def test_saved_state_survives_cleanup_failure(tmp_path):
+    from webapp.login_worker import run_login
+    state=tmp_path/'state.json'
+    def login():
+        state.write_text('{}',encoding='utf-8')
+        raise RuntimeError('close failed')
+    assert run_login(login,state)=='saved_with_warning'
+
+def test_old_state_not_reported_as_new_success(tmp_path):
+    from webapp.login_worker import run_login
+    state=tmp_path/'state.json';state.write_text('{}',encoding='utf-8')
+    assert run_login(lambda:False,state)=='not_completed'
+
+def test_account_uses_safe_login_result(client):
+    import json
+    from types import SimpleNamespace
+    manager=client.app.state.tasks
+    report=manager.store.root/'login-test.json'
+    report.write_text(json.dumps({'code':'encoding_error','secret':'DO_NOT_EXPOSE'}),encoding='utf-8')
+    manager.logins['taobao']=SimpleNamespace(poll=lambda:1)
+    manager.login_reports['taobao']=report
+    response=client.get('/api/accounts')
+    assert '字符编码错误' in response.text
+    assert 'DO_NOT_EXPOSE' not in response.text

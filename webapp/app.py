@@ -1,6 +1,7 @@
 """Loopback-only management API; private files are never mounted."""
 from __future__ import annotations
 import csv
+import json
 import io
 import os
 import zipfile
@@ -17,6 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .store import Store
 from .tasks import TaskManager, ROOT
 from .publishers import Draft, PUBLISHERS
+from .login_worker import MESSAGES
 
 class Selection(BaseModel):
     ids: list[int] = Field(min_length=1,max_length=1000)
@@ -110,7 +112,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             if proc:
                 code=proc.poll()
                 if code is None: status='登录窗口运行中，请手动扫码或验证'
-                elif code != 0: status='登录未完成或浏览器启动失败，请重试'
+                else:
+                    report=tasks.login_reports.get(platform)
+                    try:
+                        outcome=json.loads(report.read_text(encoding='utf-8')).get('code') if report else None
+                    except (OSError,ValueError):
+                        outcome=None
+                    status=MESSAGES.get(outcome,'登录进程未返回诊断结果，请更新工具后重新打开登录窗口')
             result.append({'platform':platform,'status':status})
         return result
     @app.post('/api/accounts/{platform}/login')
