@@ -73,8 +73,11 @@ class Store:
             urls=list(dict.fromkeys(([p['image_url']] if p.get('image_url') else [])+p.get('gallery',[])))
             for index,url in enumerate(urls):
                 c.execute('INSERT OR IGNORE INTO product_images(product_id,url,kind,position) VALUES(?,?,?,?)',
-                          (pid,url,'main' if url==p.get('image_url') else 'gallery',index))
-            c.execute("UPDATE product_images SET kind=CASE WHEN url=? THEN 'main' ELSE 'gallery' END WHERE product_id=?",(p.get('image_url'),pid))
+                          (pid,url,'main' if url==p.get('image_url') else p.get('image_kinds',{}).get(url,'gallery'),index))
+                kind=p.get('image_kinds',{}).get(url)
+                if kind in ('gallery','sku','detail') and url!=p.get('image_url'):
+                    c.execute('UPDATE product_images SET kind=? WHERE product_id=? AND url=?',(kind,pid,url))
+            c.execute("UPDATE product_images SET kind=CASE WHEN url=? THEN 'main' WHEN kind='main' THEN 'gallery' ELSE kind END WHERE product_id=?",(p.get('image_url'),pid))
             return pid
 
     def products(self, q: str = '', platform: str = '', status: str = '', page: int = 1, size: int = 24) -> dict[str, Any]:

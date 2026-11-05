@@ -75,15 +75,15 @@ class TaskManager:
                     if self.cancel.is_set(): break
                     if kind=='details':
                         self.save(message=f"正在补采商品详情和图集：{p['item_id']}")
-                        if p['platform']!='xianyu':
-                            p.update(detail_status='unsupported',detail_error='当前详情图集采集仅支持闲鱼，淘宝仍保留搜索主图')
-                        elif not (ROOT/'state'/'xianyu_state.json').exists():
-                            p.update(detail_status='failed',detail_error='请先登录闲鱼再补采详情')
+                        if p['platform'] not in ('taobao','xianyu'):
+                            p.update(detail_status='unsupported',detail_error='当前平台暂不支持详情图集采集')
+                        elif not (ROOT/'state'/f"{p['platform']}_state.json").exists():
+                            p.update(detail_status='failed',detail_error='请先登录对应平台再补采详情')
                         else:
                             out=self.store.root/f'{self.active["id"]}-detail.json'
                             with self.lock:
                                 if self.cancel.is_set(): break
-                                self.proc=launch([sys.executable,'-m','webapp.details',p['item_id'],str(out)])
+                                self.proc=launch([sys.executable,'-m','webapp.details',p['item_id'],str(out),p['platform']])
                             try: self.proc.wait(timeout=90)
                             except subprocess.TimeoutExpired: terminate(self.proc)
                             if self.cancel.is_set():

@@ -77,14 +77,18 @@ def collect(context: object, item_id: str) -> dict:
             except BrowserError: restricted=True
 
 
-def enrich(products: list[dict], progress: object = None) -> None:
+def enrich(products: list[dict], progress: object = None, platform: str = 'xianyu') -> None:
+    if platform not in ('taobao','xianyu'): raise ValueError('不支持的详情平台')
+    collector=collect
+    if platform=='taobao':
+        from .taobao_details import collect as collector
     with sync_playwright() as p:
         browser=p.chromium.launch(headless=False)
         try:
-            context=browser.new_context(storage_state=str(ROOT/'state'/'xianyu_state.json'),locale='zh-CN')
+            context=browser.new_context(storage_state=str(ROOT/'state'/f'{platform}_state.json'),locale='zh-CN')
             for idx, product in enumerate(products):
                 if idx: time.sleep(4.5)
-                product.update(collect(context,str(product['item_id'])))
+                product.update(collector(context,str(product['item_id'])))
                 if progress: progress(idx+1,product)
         finally:
             browser.close()
@@ -92,8 +96,9 @@ def enrich(products: list[dict], progress: object = None) -> None:
 
 def main() -> int:
     item_id, output = sys.argv[1:3]
+    platform=sys.argv[3] if len(sys.argv)>3 else 'xianyu'
     product={'item_id':item_id}
-    try: enrich([product])
+    try: enrich([product],platform=platform)
     except (BrowserError,OSError,ValueError):
         product.update(detail_status='failed',detail_error='详情浏览器启动失败，请检查登录状态和浏览器安装')
     Path(output).write_text(json.dumps(product,ensure_ascii=False),encoding='utf-8')

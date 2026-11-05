@@ -32,18 +32,18 @@ def main() -> int:
         # Do not persist exception text: upstream errors can contain session-bearing URLs.
         result['error'] = '浏览器启动或采集失败，请检查 Chromium 安装及可视桌面环境'
     for product in result['products']:
-        product['detail_status']='pending' if platform=='xianyu' else 'unsupported'
+        product['detail_status']='pending' if platform in ('taobao','xianyu') else 'unsupported'
     def save_progress(index: int | None = None, product: dict | None = None) -> None:
         result['detail_completed']=index if index is not None else result.get('detail_completed',0)
-        result['detail_total']=len(result['products']) if platform=='xianyu' else 0
+        result['detail_total']=len(result['products']) if platform in ('taobao','xianyu') else 0
         temporary=Path(output).with_suffix('.tmp')
         temporary.write_text(json.dumps(result,ensure_ascii=False),encoding='utf-8')
         temporary.replace(output)
     save_progress()
-    if platform=='xianyu' and result['success'] and result['products']:
+    if platform in ('taobao','xianyu') and result['success'] and result['products']:
         from .details import enrich
         try:
-            enrich(result['products'],save_progress)
+            enrich(result['products'],save_progress,platform=platform)
         except Exception:
             for product in result['products']:
                 if product.get('detail_status')=='pending':
