@@ -240,3 +240,22 @@ def test_available_and_no_image_filters(client):
     client.app.state.store.upsert({'platform':'xianyu','item_id':'available','title':'可下载','image_url':'https://img.alicdn.com/a.png'},'k')
     assert client.get('/api/products?status=available').json()['total']==1
     assert client.get('/api/products?status=unavailable').json()['total']==1
+
+def test_stop_preserves_collected_detail_results(client,monkeypatch,tmp_path):
+    import sys,time,json
+    import webapp.tasks as tasks
+    (tmp_path/'state').mkdir();(tmp_path/'state'/'xianyu_state.json').write_text('{}',encoding='utf-8')
+    monkeypatch.setattr(tasks,'ROOT',tmp_path)
+    original=tasks.launch
+    payload={'success':True,'products':[{'platform':'xianyu','item_id':'partial','title':'已采集','image_url':'https://img.alicdn.com/a','gallery':['https://img.alicdn.com/b'],'detail_status':'collected'}]}
+    def worker(args):
+        return original([sys.executable,'-c','import pathlib,sys,time;pathlib.Path(sys.argv[1]).write_text(sys.argv[2],encoding="utf-8");time.sleep(60)',args[-1],json.dumps(payload)])
+    monkeypatch.setattr(tasks,'launch',worker)
+    client.post('/api/tasks',json={'keywords':['k'],'platforms':['xianyu'],'pages':1})
+    deadline=time.monotonic()+5
+    while not list(client.app.state.store.root.glob('*-result.json')) and time.monotonic()<deadline:time.sleep(.02)
+    client.post('/api/tasks/stop',json={});client.app.state.tasks.thread.join(5)
+    assert client.get('/api/tasks').json()[0]['status']=='stopped'
+    products=client.get('/api/products').json()['items']
+    assert products[0]['item_id']=='partial'
+    assert len(client.app.state.store.gallery(products[0]['id']))==2

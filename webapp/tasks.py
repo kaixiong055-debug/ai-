@@ -7,6 +7,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from .store import Store, now
@@ -56,7 +57,7 @@ class TaskManager:
             if any(p.poll() is None for p in self.logins.values()): raise ValueError('请先完成登录窗口操作')
             self.cancel.clear()
             self.active={'id':uuid.uuid4().hex,'kind':kind,'status':'running','created_at':now(),
-                         'completed':0,'total':len(payload['ids']) if kind=='images' else len(payload['keywords'])*len(payload['platforms']),
+                         'completed':0,'total':len(payload['ids']) if kind in ('images','details') else len(payload['keywords'])*len(payload['platforms']),
                          'counts':{},'failures':[],'message':'准备开始'}
             self.store.save_task(self.active)
             self.thread=threading.Thread(target=self.run,args=(kind,payload),daemon=True)
@@ -69,18 +70,33 @@ class TaskManager:
 
     def run(self, kind: str, payload: dict) -> None:
         try:
-            if kind=='images':
+            if kind in ('images','details'):
                 for p in self.store.selected(payload['ids']):
                     if self.cancel.is_set(): break
-                    self.save(message=f"正在下载主图：{p['item_id']}")
-                    try:
-                        path=images.download(self.store.root,p,self.cancel)
-                        self.store.image_result(p['id'],path,None)
-                    except (ValueError,OSError,http.client.HTTPException) as e:
-                        error=str(e) if isinstance(e,ValueError) else '网络、TLS 或文件读写失败，请重试'
-                        self.store.image_result(p['id'],None,error)
-                        self.active['failures'].append({'item_id':p['item_id'],'error':error})
+                    if kind=='details':
+                        self.save(message=f"正在补采商品详情和图集：{p['item_id']}")
+                        if p['platform']!='xianyu':
+                            p.update(detail_status='unsupported',detail_error='当前详情图集采集仅支持闲鱼，淘宝仍保留搜索主图')
+                        elif not (ROOT/'state'/'xianyu_state.json').exists():
+                            p.update(detail_status='failed',detail_error='请先登录闲鱼再补采详情')
+                        else:
+                            out=self.store.root/f'{self.active["id"]}-detail.json'
+                            with self.lock:
+                                if self.cancel.is_set(): break
+                                self.proc=launch([sys.executable,'-m','webapp.details',p['item_id'],str(out)])
+                            try: self.proc.wait(timeout=90)
+                            except subprocess.TimeoutExpired: terminate(self.proc)
+                            if self.cancel.is_set():
+                                out.unlink(missing_ok=True); break
+                            if out.exists(): p.update(json.loads(out.read_text(encoding='utf-8')))
+                            else: p.update(detail_status='failed',detail_error='详情采集超时或进程未返回结果')
+                            out.unlink(missing_ok=True)
+                        self.store.upsert(p,p['keyword'])
+                        if p.get('detail_error'):
+                            self.active['failures'].append({'item_id':p['item_id'],'error':p['detail_error']})
+                    self.download_product(p,payload.get('image_ids'))
                     self.save(completed=self.active['completed']+1)
+                    if kind=='details' and self.active['completed']<self.active['total']: self.cancel.wait(4.5)
             else:
                 for platform in payload['platforms']:
                     for keyword in payload['keywords']:
@@ -94,11 +110,23 @@ class TaskManager:
                         with self.lock:
                             if self.cancel.is_set(): break
                             self.proc=launch([sys.executable,'-m','webapp.worker',platform,keyword,str(payload['pages']),str(out)])
-                        try:
-                            self.proc.wait(timeout=1800)
-                        except subprocess.TimeoutExpired:
-                            terminate(self.proc)
+                        deadline=time.monotonic()+1800
+                        while self.proc.poll() is None:
+                            if self.cancel.is_set() or time.monotonic()>deadline:
+                                terminate(self.proc); break
+                            if out.exists():
+                                try:
+                                    progress=json.loads(out.read_text(encoding='utf-8'))
+                                    if progress.get('detail_total'):
+                                        self.save(message=f"{platform} / {keyword}：详情图集已完成 {progress.get('detail_completed',0)}/{progress['detail_total']} 件")
+                                except (OSError,ValueError):
+                                    self.save(message='正在等待详情采集进度')
+                            self.cancel.wait(.5)
                         if self.cancel.is_set():
+                            if out.exists():
+                                partial=json.loads(out.read_text(encoding='utf-8'))
+                                for product in partial.get('products',[]): self.store.upsert(product,keyword)
+                                self.active['counts'][platform]=self.active['counts'].get(platform,0)+len(partial.get('products',[]))
                             out.unlink(missing_ok=True); break
                         result=json.loads(out.read_text(encoding='utf-8')) if out.exists() else {'success':False,'error':'采集进程退出或超时，未产生报告'}
                         out.unlink(missing_ok=True)
@@ -107,15 +135,9 @@ class TaskManager:
                                 if self.cancel.is_set(): break
                                 pid = self.store.upsert(product,keyword)
                                 saved = self.store.selected([pid])[0]
-                                if saved['image_status'] != 'downloaded':
-                                    self.save(message=f'正在保存 {platform} / {keyword} 主图：{product["item_id"]}')
-                                    try:
-                                        path = images.download(self.store.root,saved,self.cancel)
-                                        self.store.image_result(pid,path,None)
-                                    except (ValueError,OSError,http.client.HTTPException) as e:
-                                        error = str(e) if isinstance(e,ValueError) else '网络、TLS 或文件读写失败，请重试'
-                                        self.store.image_result(pid,None,error)
-                                        self.active['failures'].append({'platform':platform,'item_id':str(product['item_id']),'error':error})
+                                if product.get('detail_status') in ('failed','pending') or product.get('detail_error'):
+                                    self.active['failures'].append({'item_id':product['item_id'],'error':product.get('detail_error') or '图集尚未采集完成，请补采详情'})
+                                self.download_product(saved)
                             self.active['counts'][platform]=self.active['counts'].get(platform,0)+len(result['products'])
                             if not result['products']:
                                 self.active['failures'].append({'platform':platform,'keyword':keyword,'error':'返回零条商品，可能没有匹配结果或平台限制访问'})
@@ -129,6 +151,24 @@ class TaskManager:
             self.save(status='stopped' if self.cancel.is_set() else ('completed_with_errors' if self.active['failures'] else 'completed'),message='已停止' if self.cancel.is_set() else '任务已结束')
         except Exception:
             self.save(status='failed',message='任务异常结束，请检查本地文件权限、磁盘空间或输入数据')
+
+    def download_product(self, product: dict, image_ids: list[int] | None = None) -> None:
+        gallery=self.store.gallery(product['id'])
+        if not gallery:
+            self.store.image_result(product['id'],None,'搜索结果未提供主图')
+            self.active['failures'].append({'item_id':product['item_id'],'error':'搜索结果未提供图片'})
+        for image in gallery:
+            if self.cancel.is_set(): break
+            if image_ids is not None and image['id'] not in image_ids: continue
+            if image['status']=='downloaded' and image['path'] and (self.store.root/image['path']).is_file(): continue
+            self.save(message=f"正在下载商品 {product['item_id']} 图片 {image['position']+1}/{len(gallery)}")
+            try:
+                path=images.download(self.store.root,{**product,'image_url':image['url']},self.cancel)
+                self.store.gallery_result(image['id'],path,None)
+            except (ValueError,OSError,http.client.HTTPException) as exc:
+                error=str(exc) if isinstance(exc,ValueError) else '网络、TLS 或文件读写失败，请重试'
+                self.store.gallery_result(image['id'],None,error)
+                self.active['failures'].append({'item_id':product['item_id'],'error':f"图片 {image['position']+1}：{error}"})
 
     def stop(self) -> None:
         with self.lock:

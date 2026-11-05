@@ -83,7 +83,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def detail(pid: int) -> dict:
         rows=store.selected([pid])
         if not rows: raise HTTPException(404,'商品不存在')
-        return rows[0]
+        return {**rows[0],'gallery':store.gallery(pid)}
     @app.get('/api/images/{pid}/preview')
     def preview(pid: int) -> Response:
         rows=store.selected([pid])
@@ -98,6 +98,33 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             return Response(out.getvalue(),media_type='image/jpeg',headers={'Cache-Control':'private, max-age=300'})
         except (ValueError,OSError,http.client.HTTPException) as exc:
             raise HTTPException(502,'预览暂不可用，可选择下载重试查看原因') from exc
+    @app.post('/api/details/collect')
+    def collect_details(selection: Selection) -> dict:
+        try: return tasks.start('details',selection.model_dump())
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+    @app.post('/api/gallery/download')
+    def download_gallery(selection: Selection) -> dict:
+        with store.connect() as c:
+            rows=c.execute('SELECT DISTINCT product_id FROM product_images WHERE id IN ('+','.join('?' for _ in selection.ids)+')',selection.ids).fetchall()
+        if not rows: raise HTTPException(404,'图片不存在')
+        try: return tasks.start('images',{'ids':[r[0] for r in rows],'image_ids':selection.ids})
+        except ValueError as exc: raise HTTPException(409,str(exc)) from exc
+    @app.get('/api/gallery/{iid}')
+    def gallery_image(iid: int, preview: bool = False) -> Response:
+        with store.connect() as c:
+            row=c.execute('SELECT * FROM product_images WHERE id=?',(iid,)).fetchone()
+        if not row: raise HTTPException(404,'图片不存在')
+        if row['path']:
+            path=(store.root/row['path']).resolve()
+            if path.is_relative_to(store.root/'images') and path.is_file(): return FileResponse(path)
+        if not preview: raise HTTPException(404,'图片尚未下载')
+        try:
+            data=images.fetch_image(row['url']); images.verify_image(data)
+            with Image.open(io.BytesIO(data)) as img:
+                img.thumbnail((480,480)); out=io.BytesIO(); img.convert('RGB').save(out,format='JPEG',quality=80)
+            return Response(out.getvalue(),media_type='image/jpeg',headers={'Cache-Control':'private, max-age=300'})
+        except (ValueError,OSError,http.client.HTTPException) as exc:
+            raise HTTPException(502,'图片预览失败，请下载重试') from exc
     @app.post('/api/products/delete')
     def delete(selection: Selection) -> dict:
         store.delete(selection.ids); return {'ok':True}
@@ -161,10 +188,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         archive = Path(filename)
         with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
             z.writestr('products.csv',csv_data(rows))
+            added=set()
             for p in rows:
-                if p.get('image_path'):
-                    path=(store.root/p['image_path']).resolve()
-                    if path.is_relative_to(store.root/'images') and path.is_file(): z.write(path,p['image_path'])
+                for image in store.gallery(p['id']):
+                    if image.get('path') and image['path'] not in added:
+                        path=(store.root/image['path']).resolve()
+                        if path.is_relative_to(store.root/'images') and path.is_file():
+                            z.write(path,image['path']); added.add(image['path'])
         return FileResponse(archive,media_type='application/zip',filename='products.zip',background=BackgroundTask(archive.unlink,missing_ok=True))
     @app.get('/api/drafts')
     def drafts() -> list[dict]: return store.drafts()
