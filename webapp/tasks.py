@@ -59,6 +59,7 @@ class TaskManager:
             self.active={'id':uuid.uuid4().hex,'kind':kind,'status':'running','created_at':now(),
                          'completed':0,'total':len(payload['ids']) if kind in ('images','details') else len(payload['keywords'])*len(payload['platforms']),
                          'counts':{},'failures':[],'message':'准备开始'}
+            if kind=='details': self.active['item_states']={str(pid):'queued' for pid in payload['ids']}
             self.store.save_task(self.active)
             self.thread=threading.Thread(target=self.run,args=(kind,payload),daemon=True)
             self.thread.start()
@@ -74,6 +75,8 @@ class TaskManager:
                 for p in self.store.selected(payload['ids']):
                     if self.cancel.is_set(): break
                     if kind=='details':
+                        with self.lock:
+                            self.active['item_states'][str(p['id'])]='running'
                         self.save(message=f"正在补采商品详情和图集：{p['item_id']}")
                         if p['platform'] not in ('taobao','xianyu'):
                             p.update(detail_status='unsupported',detail_error='当前平台暂不支持详情图集采集')
@@ -92,6 +95,8 @@ class TaskManager:
                             else: p.update(detail_status='failed',detail_error='详情采集超时或进程未返回结果')
                             out.unlink(missing_ok=True)
                         self.store.upsert(p,p['keyword'])
+                        with self.lock:
+                            self.active['item_states'][str(p['id'])]=p.get('detail_status','failed')
                         if p.get('detail_error'):
                             self.active['failures'].append({'item_id':p['item_id'],'error':p['detail_error']})
                     if kind=='images': self.download_product(p,payload.get('image_ids'))

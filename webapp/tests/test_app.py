@@ -343,3 +343,19 @@ def test_list_task_completes_without_details_and_preserves_previous_details(clie
     assert old['detail_status']=='collected' and old['description']=='保留描述'
     assert len(old['gallery'])==1
     assert not (store.root/'images').exists()
+
+def test_picker_exposes_finished_details_while_batch_still_running(client,monkeypatch):
+    store=client.app.state.store
+    first=store.upsert({'platform':'taobao','item_id':'101','title':'完成商品','detail_status':'collected','description':'立即可读'},'k')
+    second=store.upsert({'platform':'taobao','item_id':'102','title':'处理中'},'k')
+    monkeypatch.setattr(client.app.state.picker,'status',lambda:{'status':'ready','candidates':[
+        {'platform':'taobao','item_id':'101'}, {'platform':'taobao','item_id':'102'}]})
+    client.app.state.tasks.active={'kind':'details','status':'running','item_states':{str(first):'collected',str(second):'running'}}
+    cards=client.get('/api/selection/browser').json()['candidates']
+    assert cards[0]['collection_status']=='collected'
+    assert cards[0]['product_id']==first
+    assert cards[1]['collection_status']=='running'
+    assert client.get(f'/api/products/{first}').json()['description']=='立即可读'
+    client.app.state.tasks.active['status']='stopped'
+    assert client.get('/api/selection/browser').json()['candidates'][1]['collection_status']=='pending'
+    client.app.state.tasks.active={}

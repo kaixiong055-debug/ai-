@@ -101,7 +101,24 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         try: return {'ids':import_links(store,body.urls,body.keyword),'message':'已加入商品库，尚未采集详情或下载图片'}
         except ValueError as exc: raise HTTPException(422,str(exc)) from exc
     @app.get('/api/selection/browser')
-    def browser_status() -> dict: return picker.status()
+    def browser_status() -> dict:
+        state = picker.status()
+        with tasks.lock:
+            active = tasks.active
+            item_states = dict(active.get('item_states', {})) if active.get('kind') == 'details' and active.get('status') in ('running', 'stopping') else {}
+        candidates = []
+        with store.connect() as connection:
+            for candidate in state.get('candidates', []):
+                card = dict(candidate)
+                product = connection.execute('SELECT id,detail_status,detail_error FROM products WHERE platform=? AND item_id=?',
+                                             (card['platform'], str(card['item_id']))).fetchone()
+                card.update(product_id=None, collection_status='not_imported', collection_error=None)
+                if product:
+                    card.update(product_id=product['id'], collection_status=item_states.get(str(product['id']), product['detail_status']),
+                                collection_error=product['detail_error'])
+                    if card['collection_status'] in ('queued', 'running'): card['collection_error'] = None
+                candidates.append(card)
+        return {**state, 'candidates': candidates}
     @app.post('/api/selection/browser/open')
     def browser_open(body: BrowserStart) -> dict:
         try: return picker.start(body.platform)
