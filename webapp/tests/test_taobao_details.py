@@ -24,7 +24,10 @@ def test_gallery_type_persists_on_search_refresh(tmp_path: Path):
     assert store.gallery(pid)[1]['kind']=='sku'
 
 @pytest.mark.parametrize('jsonp',[False,True])
-def test_taobao_browser_collects_lazy_description(jsonp):
+@pytest.mark.parametrize('main_api',['mtop.taobao.pcdetail.data.get','mtop.taobao.detail.newversion.get'])
+def test_taobao_browser_collects_lazy_description(jsonp,main_api,monkeypatch):
+    from unittest.mock import Mock
+    monkeypatch.setattr('webapp.taobao_details.time.monotonic',Mock(side_effect=[0,30]))
     from webapp.taobao_details import collect
     from urllib.parse import urlencode
     class Response:
@@ -47,7 +50,7 @@ def test_taobao_browser_collects_lazy_description(jsonp):
         def on(self,event,callback): self.callback=callback
         def goto(self,url,**kwargs):
             assert url==self.url
-            self.callback(Response('mtop.taobao.pcdetail.data.get',{'data':{'item':{'itemId':'42','images':['//img.alicdn.com/main.jpg']}}}))
+            self.callback(Response(main_api,{'data':{'item':{'itemId':'42','images':['//img.alicdn.com/main.jpg']}}}))
         def locator(self,selector): return EmptyLocator()
         @property
         def mouse(self): return self
@@ -113,3 +116,23 @@ def test_taobao_failure_diagnostic_does_not_expose_response(monkeypatch):
     assert '商品结构未匹配 1 次' in result['detail_error']
     assert 'private-account-value' not in str(result)
     page.close.assert_called_once()
+
+@pytest.mark.parametrize('returned_id',['other',None])
+def test_unknown_api_requires_explicit_matching_product_id(monkeypatch,returned_id):
+    import webapp.taobao_details as adapter
+    from unittest.mock import Mock
+    from urllib.parse import urlencode
+    response=Mock(url='https://h5api.m.taobao.com/h5/mtop.taobao.detail.newversion.get/1.0/?'+urlencode({'data':'{"id":"42"}'}),status=200)
+    item={'images':['https://img.alicdn.com/not-confirmed']}
+    if returned_id:item['itemId']=returned_id
+    response.json.return_value={'data':{'item':item}}
+    page=Mock(url='https://item.taobao.com/item.htm?id=42')
+    callbacks={};page.on.side_effect=lambda e,cb:callbacks.update({e:cb})
+    page.goto.side_effect=lambda *a,**k:callbacks['response'](response)
+    page.is_closed.return_value=False
+    context=Mock();context.new_page.return_value=page
+    monkeypatch.setattr(adapter.time,'monotonic',Mock(side_effect=[0,30]))
+    result=adapter.collect(context,'42')
+    assert result['detail_status']=='failed' and not result.get('gallery')
+    assert 'MTop 响应 1 次' in result['detail_error']
+    assert '目标商品地址' in result['detail_error']

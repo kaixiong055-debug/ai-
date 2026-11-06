@@ -106,7 +106,8 @@ def collect(context: object, item_id: str) -> dict:
     desc_text=''
     restricted=False
     description_response=False
-    observed={'responses':0,'unreadable':0,'unrecognized':0,'other_item':0,'http_errors':0}
+    api_names=set()
+    observed={'mtop':0,'responses':0,'unreadable':0,'unrecognized':0,'other_item':0,'http_errors':0}
     def response_handler(response: object) -> None:
         nonlocal restricted, desc_text, description_response
         parsed=urlsplit(response.url)
@@ -115,21 +116,28 @@ def collect(context: object, item_id: str) -> dict:
         path=parsed.path.lower()
         main=any('/'+api+'/' in path for api in ('mtop.taobao.pcdetail.data.get','mtop.taobao.detail.get','mtop.taobao.detail.data.get'))
         desc='/mtop.taobao.detail.getdesc/' in path
-        if not main and not desc: return
+        api_match=re.search(r'/(mtop\.[a-z0-9_.]{1,100})/',path)
+        if not api_match:return
+        observed['mtop']+=1
+        if len(api_names)<8:api_names.add(api_match.group(1))
+        # Unknown MTop APIs may carry a newer detail payload. Identity must be explicit below.
+
         bound=request_item(response.url)
         if bound and bound!=item_id:
             observed['other_item']+=1
             return
-        observed['responses']+=1
+        if main or desc:observed['responses']+=1
         if getattr(response,'status',200)>=400:observed['http_errors']+=1
         try:
             payload=response_payload(response)
             if not isinstance(payload,dict): return
             ret=str(payload.get('ret',[]))
-            if any(x in ret for x in ('FAIL_SYS_USER_VALIDATE','FAIL_SYS_SESSION_EXPIRED','RGV587','FAIL_SYS_LOGIN')): restricted=True
-            if main:
-                result=parse_detail(payload,item_id,bound)
-                if result: merge_result(found,result)
+            if (main or desc or bound==item_id) and any(x in ret for x in ('FAIL_SYS_USER_VALIDATE','FAIL_SYS_SESSION_EXPIRED','RGV587','FAIL_SYS_LOGIN')): restricted=True
+            if not desc:
+                result=parse_detail(payload,item_id,bound if main else '')
+                if result:
+                    if not main:observed['responses']+=1
+                    merge_result(found,result)
                 else:observed['unrecognized']+=1
             elif bound==item_id and isinstance(payload.get('data'),dict):
                 urls,text=description_fields(payload['data']);desc_images.extend(urls)
@@ -175,7 +183,14 @@ def collect(context: object, item_id: str) -> dict:
                 found.update(detail_status='partial',detail_error='已保存可见详情图，未取得完整描述响应，无法确认图集完整；可补采重试')
             if restricted:found.update(detail_status='partial',auth_required=True,detail_error='已保留部分详情；平台要求登录或人工验证，请完成后重试')
             return found
-        diagnostic=(f"后台未取得匹配详情：识别到详情响应 {observed['responses']} 次，"
+        parsed_page=urlsplit(page.url)
+        page_state='登录页' if 'login' in (parsed_page.hostname or '') else (
+            '验证页' if any(part in parsed_page.path.lower() for part in ('punish','captcha','verify')) else (
+                '目标商品地址' if parsed_page.hostname=='item.taobao.com' and parse_qs(parsed_page.query).get('id')==[item_id] else '其他地址'))
+        if page_state in ('登录页','验证页'):restricted=True
+        diagnostic=(f"后台页面：{page_state}；MTop 响应 {observed['mtop']} 次；"
+                    f"接口名称：{', '.join(sorted(api_names)) or '未观察到'}。"
+                    f"后台未取得匹配详情：识别到详情响应 {observed['responses']} 次，"
                     f"格式读取失败 {observed['unreadable']} 次，商品结构未匹配 {observed['unrecognized']} 次，"
                     f"其他商品响应 {observed['other_item']} 次，HTTP 错误 {observed['http_errors']} 次。"
                     '这不代表商品下架；请反馈此提示以定位后台登录或接口兼容问题，已有资料保留')
