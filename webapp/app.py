@@ -42,6 +42,10 @@ class LinkImport(BaseModel):
 class BrowserStart(BaseModel):
     platform: Literal['taobao','xianyu']
 
+class OriginalProduct(BaseModel):
+    url: str = Field(...,max_length=2048)
+
+
 class BrowserCommand(BaseModel):
     action: Literal['navigate','current','list','shop','save_login']
     page: str = Field('',max_length=30)
@@ -67,6 +71,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     store=Store(data_dir or Path(os.environ.get('PRODUCT_TOOL_DATA',ROOT/'data'/'webapp')))
     tasks=TaskManager(store)
     picker=PickerSession(store.root)
+    tasks.picker=picker
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         yield
@@ -100,6 +105,15 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     def add_links(body: LinkImport) -> dict:
         try: return {'ids':import_links(store,body.urls,body.keyword),'message':'已加入商品库，尚未采集详情或下载图片'}
         except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+    @app.post('/api/selection/browser/product')
+    def open_original(body: OriginalProduct) -> dict:
+        with tasks.lock:
+            if tasks.thread and tasks.thread.is_alive():
+                raise HTTPException(409,'采集期间请先查看本地详情；完成或停止任务后可在登录窗口打开原商品')
+            if any(proc.poll() is None for proc in tasks.logins.values()):
+                raise HTTPException(409,'请先完成登录窗口操作')
+            try:return picker.open_product(body.url)
+            except ValueError as exc:raise HTTPException(409,str(exc)) from exc
     @app.get('/api/selection/browser')
     def browser_status() -> dict:
         state = picker.status()
@@ -121,6 +135,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         return {**state, 'candidates': candidates}
     @app.post('/api/selection/browser/open')
     def browser_open(body: BrowserStart) -> dict:
+        if any(proc.poll() is None for proc in tasks.logins.values()):raise HTTPException(409,'请先完成登录窗口操作')
+        if tasks.thread and tasks.thread.is_alive():raise HTTPException(409,'请先完成或停止采集任务')
         try: return picker.start(body.platform)
         except ValueError as exc: raise HTTPException(409,str(exc)) from exc
     @app.post('/api/selection/browser/command')
@@ -131,6 +147,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         except ValueError as exc: raise HTTPException(409,str(exc)) from exc
     @app.post('/api/selection/browser/close')
     def browser_close() -> dict:
+        if picker.leased:raise HTTPException(409,'窗口正在采集详情，请先停止任务')
         picker.close();return picker.status()
     @app.get('/api/selection/browser/preview')
     def candidate_preview(url: str) -> Response:
@@ -247,7 +264,12 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     @app.post('/api/accounts/{platform}/login')
     def login(platform: str) -> dict:
         if platform not in ('taobao','xianyu'): raise HTTPException(404)
-        try: tasks.login(platform)
+        try:
+            if picker.proc and picker.proc.poll() is None:
+                if tasks.thread and tasks.thread.is_alive():raise ValueError('请先完成或停止采集任务')
+                if picker.platform!=platform:raise ValueError('请先关闭其他平台选品窗口，再登录此平台')
+                picker.send({'action':'navigate','url':'https://www.taobao.com/' if platform=='taobao' else 'https://www.goofish.com/'})
+            else:tasks.login(platform)
         except ValueError as e: raise HTTPException(409,str(e)) from e
         return {'message':'已请求打开本机登录窗口'}
     @app.post('/api/export/{kind}')

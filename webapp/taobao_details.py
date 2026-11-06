@@ -130,6 +130,7 @@ def collect(context: object, item_id: str) -> dict:
             stable=0
             previous=()
             for _ in range(12):
+                if restricted or description_response or found.get('detail_status')=='collected': break
                 container=page.locator('#description, #J_DivItemDesc, [data-testid="item-description"]').first
                 if container.count():
                     container.scroll_into_view_if_needed(timeout=5000)
@@ -151,11 +152,13 @@ def collect(context: object, item_id: str) -> dict:
                 found.update(detail_status='collected',detail_error=None)
             elif desc_images:
                 found.update(detail_status='partial',detail_error='已保存可见详情图，未取得完整描述响应，无法确认图集完整；可补采重试')
+            if restricted:found.update(detail_status='partial',auth_required=True,detail_error='已保留部分详情；平台要求登录或人工验证，请完成后重试')
             return found
-        return {'detail_status':'failed','detail_error':'淘宝详情需要登录或人工验证，请完成登录后重试' if restricted else '未取得匹配商品的淘宝详情：可能访问受限、商品下架或接口结构变化；保留已有主图'}
+        return {'detail_status':'failed','auth_required':restricted,'detail_error':'淘宝详情需要登录或人工验证，请完成登录后重试' if restricted else '未取得匹配商品的淘宝详情：可能访问受限、商品下架或接口结构变化；保留已有主图'}
     except BrowserError:
         if found:
             found.update(detail_status='partial',detail_error='已保留获取的图片；详情页面加载中断，请补采重试')
+            if restricted:found.update(detail_status='partial',auth_required=True,detail_error='已保留部分详情；平台要求登录或人工验证，请完成后重试')
             return found
         return {'detail_status':'failed','detail_error':'淘宝详情页面加载失败或窗口被关闭，请检查网络后重试'}
     finally:

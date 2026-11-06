@@ -109,10 +109,14 @@ def main() -> int:
             if login.exists(): kwargs['storage_state']=str(login)
             context=browser.new_context(**kwargs)
             page=context.new_page()
-            page.goto('https://www.goofish.com/' if platform=='xianyu' else 'https://www.taobao.com/',wait_until='domcontentloaded',timeout=30000)
+            initial=product_link(sys.argv[3])['url'] if len(sys.argv)>3 and sys.argv[3] else ('https://www.goofish.com/' if platform=='xianyu' else 'https://www.taobao.com/')
+            page.goto(initial,wait_until='domcontentloaded',timeout=30000)
             state.update(status='ready',message='请在平台窗口浏览商品或店铺，再回管理页面读取；可选择标签页')
             last='';pages={};tick=0
             while browser.is_connected() and context.pages:
+                if tick%20==0:
+                    try:save_login(context,platform)
+                    except (OSError,BrowserError):pass
                 if tick%4==0:
                     for tab in context.pages:
                         if not tab.is_closed() and tab not in pages.values():
@@ -136,6 +140,29 @@ def main() -> int:
                             if page.is_closed(): raise ValueError('标签页已关闭，请选择其他标签页')
                             state.update(status='busy',message='正在读取平台页面')
                             write_json(status,state)
+                            if cmd['action']=='close':
+                                try:save_login(context,platform)
+                                except (OSError,BrowserError):pass
+                                break
+                            if cmd['action']=='detail':
+                                from .details import collect_in_context
+                                result=collect_in_context(context,platform,cmd['item_id'])
+                                if not result.get('auth_required'):
+                                    try:save_login(context,platform)
+                                    except (OSError,BrowserError):pass
+                                state.update(status='ready',message='单件详情已处理；结果已保存到商品库任务')
+                                write_json(status,state)
+                                write_json(folder/'result.json',{'request_id':last,'result':result})
+                                continue
+                            if cmd['action']=='open_product':
+                                product=product_link(cmd['url'])
+                                if product['platform']!=platform:raise ValueError('平台不匹配')
+                                tab=context.new_page()
+                                tab.goto(product['url'],wait_until='domcontentloaded',timeout=30000)
+                                tab.bring_to_front()
+                                state.update(status='ready',message='已在当前登录会话打开原商品；如平台要求验证，请在此窗口完成')
+                                write_json(status,state)
+                                continue
                             if cmd['action']=='save_login':
                                 saved=save_login(context,platform)
                                 state.update(status='ready',message='已保存本窗口登录状态，平台有效性待采集验证' if saved else '未检测到有效登录标记，请先在平台窗口完成登录')
@@ -172,6 +199,8 @@ def main() -> int:
                 time.sleep(.25);tick+=1
                 # Pump Playwright events without exposing any page content outside the candidate schema.
                 if not page.is_closed(): page.wait_for_timeout(10)
+            try:save_login(context,platform)
+            except (OSError,BrowserError):pass
             browser.close()
     except (BrowserError,OSError,ValueError):
         state.update(status='failed',message='选品浏览器启动或访问失败，请检查 Chromium、平台登录和网络；可关闭后重新打开')

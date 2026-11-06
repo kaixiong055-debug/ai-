@@ -14,6 +14,7 @@ from .store import Store, now
 from . import images
 
 ROOT = Path(__file__).resolve().parent.parent
+DETAIL_MIN_INTERVAL_SECONDS = 4.5
 
 
 def terminate(proc: subprocess.Popen) -> None:
@@ -44,6 +45,8 @@ class TaskManager:
         self.active: dict = {}
         self.cancel=threading.Event()
         self.proc: subprocess.Popen | None=None
+        self.picker=None
+        self.detail_sessions={}
         self.thread: threading.Thread | None=None
         self.logins: dict[str,subprocess.Popen]={}
         self.login_reports: dict[str,Path]={}
@@ -55,6 +58,8 @@ class TaskManager:
         with self.lock:
             if self.thread and self.thread.is_alive(): raise ValueError('已有任务执行中，请等待完成或停止')
             if any(p.poll() is None for p in self.logins.values()): raise ValueError('请先完成登录窗口操作')
+            if kind=='details' and self.picker and self.picker.proc and self.picker.proc.poll() is None and self.picker.status()['status']!='ready':
+                raise ValueError('选品浏览器正在操作，请等待完成后再采集详情')
             self.cancel.clear()
             self.active={'id':uuid.uuid4().hex,'kind':kind,'status':'running','created_at':now(),
                          'completed':0,'total':len(payload['ids']) if kind in ('images','details') else len(payload['keywords'])*len(payload['platforms']),
@@ -71,6 +76,7 @@ class TaskManager:
 
     def run(self, kind: str, payload: dict) -> None:
         try:
+            previous_start=0.0
             if kind in ('images','details'):
                 for p in self.store.selected(payload['ids']):
                     if self.cancel.is_set(): break
@@ -80,20 +86,23 @@ class TaskManager:
                         self.save(message=f"正在补采商品详情和图集：{p['item_id']}")
                         if p['platform'] not in ('taobao','xianyu'):
                             p.update(detail_status='unsupported',detail_error='当前平台暂不支持详情图集采集')
-                        elif not (ROOT/'state'/f"{p['platform']}_state.json").exists():
-                            p.update(detail_status='failed',detail_error='请先登录对应平台再补采详情')
                         else:
-                            out=self.store.root/f'{self.active["id"]}-detail.json'
-                            with self.lock:
-                                if self.cancel.is_set(): break
-                                self.proc=launch([sys.executable,'-m','webapp.details',p['item_id'],str(out),p['platform']])
-                            try: self.proc.wait(timeout=90)
-                            except subprocess.TimeoutExpired: terminate(self.proc)
-                            if self.cancel.is_set():
-                                out.unlink(missing_ok=True); break
-                            if out.exists(): p.update(json.loads(out.read_text(encoding='utf-8')))
-                            else: p.update(detail_status='failed',detail_error='详情采集超时或进程未返回结果')
-                            out.unlink(missing_ok=True)
+                            from .detail_session import DetailSession
+                            platform=p['platform']
+                            live=self.picker and self.picker.proc and self.picker.proc.poll() is None and self.picker.platform==platform
+                            if not live and not (ROOT/'state'/f'{platform}_state.json').exists():
+                                p.update(detail_status='failed',detail_error='请先登录对应平台再补采详情',auth_required=True)
+                            else:
+                                # Count navigation time towards the existing minimum spacing.
+                                self.cancel.wait(max(0,DETAIL_MIN_INTERVAL_SECONDS-(time.monotonic()-previous_start)))
+                                if self.cancel.is_set():break
+                                previous_start=time.monotonic()
+                                session=self.detail_sessions.get(platform)
+                                if session is None:
+                                    session=DetailSession(self.store.root,platform,launch,self.picker)
+                                    self.detail_sessions[platform]=session
+                                p.update(session.collect(p['item_id'],self.cancel))
+                                if self.cancel.is_set():break
                         self.store.upsert(p,p['keyword'])
                         with self.lock:
                             self.active['item_states'][str(p['id'])]=p.get('detail_status','failed')
@@ -101,7 +110,9 @@ class TaskManager:
                             self.active['failures'].append({'item_id':p['item_id'],'error':p['detail_error']})
                     if kind=='images': self.download_product(p,payload.get('image_ids'))
                     self.save(completed=self.active['completed']+1)
-                    if kind=='details' and self.active['completed']<self.active['total']: self.cancel.wait(4.5)
+                    if kind=='details' and (p.get('auth_required') or p.get('session_failed')):
+                        self.save(message='登录/验证或会话异常，本批已停止继续访问；已完成商品保留')
+                        break
             else:
                 for platform in payload['platforms']:
                     for keyword in payload['keywords']:
@@ -142,9 +153,15 @@ class TaskManager:
                         if self.active['completed'] < self.active['total']:
                             self.save(message='采集间隔等待（保护账号），可随时停止')
                             self.cancel.wait(30)
-            self.save(status='stopped' if self.cancel.is_set() else ('completed_with_errors' if self.active['failures'] else 'completed'),message='已停止' if self.cancel.is_set() else '任务已结束')
+            self.save(status='stopped' if self.cancel.is_set() else ('completed_with_errors' if self.active['failures'] else 'completed'),message='已停止' if self.cancel.is_set() else ('任务已结束；存在未完成商品，请查看失败原因后重试' if self.active['completed']<self.active['total'] else '任务已结束'))
+        except ValueError:
+            self.save(status='failed',message='任务无法继续，请确认选品窗口已就绪、登录有效后重试')
         except Exception:
             self.save(status='failed',message='任务异常结束，请检查本地文件权限、磁盘空间或输入数据')
+
+        finally:
+            for session in self.detail_sessions.values():session.close()
+            self.detail_sessions.clear()
 
     def download_product(self, product: dict, image_ids: list[int] | None = None) -> None:
         gallery=self.store.gallery(product['id'])

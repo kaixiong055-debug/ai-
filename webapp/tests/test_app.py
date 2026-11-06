@@ -271,11 +271,10 @@ def test_detail_collection_does_not_download(client,monkeypatch,tmp_path):
     (tmp_path/'state').mkdir();(tmp_path/'state'/'taobao_state.json').write_text('{}',encoding='utf-8')
     monkeypatch.setattr(tasks,'ROOT',tmp_path)
     pid=seed(client)
-    original=tasks.launch
-    payload={'detail_status':'collected','description':'介绍','gallery':['https://img.alicdn.com/a','https://img.alicdn.com/b']}
-    def worker(args):
-        return original([sys.executable,'-c','import pathlib,sys;pathlib.Path(sys.argv[1]).write_text(sys.argv[2],encoding="utf-8")',args[4],json.dumps(payload)])
-    monkeypatch.setattr(tasks,'launch',worker)
+    from unittest.mock import Mock
+    session=Mock()
+    session.collect.return_value={'detail_status':'collected','description':'介绍','gallery':['https://img.alicdn.com/a','https://img.alicdn.com/b']}
+    monkeypatch.setattr('webapp.detail_session.DetailSession',Mock(return_value=session))
     client.post('/api/details/collect',json={'ids':[pid]});client.app.state.tasks.thread.join(5)
     assert client.get('/api/tasks').json()[0]['status']=='completed'
     gallery=client.get(f'/api/products/{pid}').json()['gallery']
@@ -359,3 +358,49 @@ def test_picker_exposes_finished_details_while_batch_still_running(client,monkey
     client.app.state.tasks.active['status']='stopped'
     assert client.get('/api/selection/browser').json()['candidates'][1]['collection_status']=='pending'
     client.app.state.tasks.active={}
+
+def test_original_endpoint_reuses_tool_and_rejects_external_links(client,monkeypatch):
+    from unittest.mock import Mock
+    picker=client.app.state.picker
+    picker.proc=Mock();picker.proc.poll.return_value=None;picker.platform='taobao'
+    monkeypatch.setattr(picker,'send',Mock(return_value={'status':'busy'}))
+    assert client.post('/api/selection/browser/product',json={'url':'https://item.taobao.com/item.htm?id=123'}).status_code==200
+    assert picker.send.call_args.args[0]['action']=='open_product'
+    assert client.post('/api/selection/browser/product',json={'url':'https://evil.com'}).status_code==409
+    picker.proc=None
+
+
+def test_detail_auth_failure_stops_batch_before_next_item(client,monkeypatch,tmp_path):
+    from unittest.mock import Mock
+    import webapp.tasks as tasks
+    (tmp_path/'state').mkdir();(tmp_path/'state'/'taobao_state.json').write_text('{}')
+    monkeypatch.setattr(tasks,'ROOT',tmp_path)
+    ids=[client.app.state.store.upsert({'platform':'taobao','item_id':str(i),'title':'商品'},'k') for i in (1,2)]
+    session=Mock();session.collect.return_value={'detail_status':'failed','detail_error':'需要验证','auth_required':True}
+    factory=Mock(return_value=session)
+    monkeypatch.setattr('webapp.detail_session.DetailSession',factory)
+    client.post('/api/details/collect',json={'ids':ids});client.app.state.tasks.thread.join(5)
+    assert session.collect.call_count==1
+    session.close.assert_called_once()
+    task=client.get('/api/tasks').json()[0]
+    assert task['status']=='completed_with_errors' and task['completed']==1
+    assert client.get(f'/api/products/{ids[1]}').json()['detail_status']=='pending'
+
+def test_detail_batch_reuses_session_and_saves_each_product(client,monkeypatch,tmp_path):
+    from unittest.mock import Mock
+    import webapp.tasks as tasks
+    (tmp_path/'state').mkdir();(tmp_path/'state'/'taobao_state.json').write_text('{}')
+    monkeypatch.setattr(tasks,'ROOT',tmp_path)
+    monkeypatch.setattr(tasks,'DETAIL_MIN_INTERVAL_SECONDS',0)
+    store=client.app.state.store
+    ids=[store.upsert({'platform':'taobao','item_id':str(i),'title':'商品'},'k') for i in (1,2)]
+    def collect(item_id,cancel):
+        if item_id=='2':assert store.selected([ids[0]])[0]['description']=='详情1'
+        return {'detail_status':'collected','description':'详情'+item_id}
+    session=Mock();session.collect.side_effect=collect
+    factory=Mock(return_value=session)
+    monkeypatch.setattr('webapp.detail_session.DetailSession',factory)
+    client.post('/api/details/collect',json={'ids':ids});client.app.state.tasks.thread.join(5)
+    assert factory.call_count==1 and session.collect.call_count==2
+    assert client.get('/api/tasks').json()[0]['status']=='completed'
+    assert store.selected([ids[1]])[0]['description']=='详情2'

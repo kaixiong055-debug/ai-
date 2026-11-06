@@ -66,7 +66,7 @@ def collect(context: object, item_id: str) -> dict:
             if 'login' in page.url.lower(): restricted=True; break
             page.wait_for_timeout(500)
         if found: return found
-        return {'detail_status':'failed','detail_error':
+        return {'detail_status':'failed','auth_required':restricted,'detail_error':
                 '详情需要登录或人工验证，请在平台账号重新登录后重试' if restricted else
                 '未获取到匹配商品的图集：可能访问受限、商品下架或详情接口结构变化；保留已有主图'}
     except BrowserError:
@@ -75,6 +75,15 @@ def collect(context: object, item_id: str) -> dict:
         if not page.is_closed():
             try: page.close()
             except BrowserError: restricted=True
+
+
+def collect_in_context(context: object, platform: str, item_id: str) -> dict:
+    collector=collect
+    if platform=='taobao':
+        from .taobao_details import collect as collector
+    try:return collector(context,item_id)
+    except (BrowserError,OSError,ValueError):
+        return {'detail_status':'failed','detail_error':'详情页面读取失败，请检查网络和平台状态'}
 
 
 def enrich(products: list[dict], progress: object = None, platform: str = 'xianyu') -> None:
