@@ -1,11 +1,24 @@
 """Taobao detail adapter: ordinary browser responses, no synthesized API signatures."""
 from __future__ import annotations
 import json
+import re
 import time
 from html.parser import HTMLParser
 from urllib.parse import parse_qs, quote, urlsplit
 from playwright.sync_api import Error as BrowserError
 from .details import normalize
+
+
+def response_payload(response: object) -> dict:
+    """Accept JSON or a JSONP wrapper as data; never execute callback text."""
+    try:payload=response.json()
+    except ValueError:
+        text=response.text().strip()
+        match=re.fullmatch(r'[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\s*\((.*)\)\s*;?',text,re.S)
+        if not match:raise ValueError('响应不是可识别的 JSON/JSONP')
+        payload=json.loads(match.group(1))
+    if not isinstance(payload,dict):raise ValueError('响应不是对象')
+    return payload
 
 
 class Description(HTMLParser):
@@ -93,6 +106,7 @@ def collect(context: object, item_id: str) -> dict:
     desc_text=''
     restricted=False
     description_response=False
+    observed={'responses':0,'unreadable':0,'unrecognized':0,'other_item':0,'http_errors':0}
     def response_handler(response: object) -> None:
         nonlocal restricted, desc_text, description_response
         parsed=urlsplit(response.url)
@@ -103,20 +117,27 @@ def collect(context: object, item_id: str) -> dict:
         desc='/mtop.taobao.detail.getdesc/' in path
         if not main and not desc: return
         bound=request_item(response.url)
-        if bound and bound!=item_id: return
+        if bound and bound!=item_id:
+            observed['other_item']+=1
+            return
+        observed['responses']+=1
+        if getattr(response,'status',200)>=400:observed['http_errors']+=1
         try:
-            payload=response.json()
+            payload=response_payload(response)
             if not isinstance(payload,dict): return
             ret=str(payload.get('ret',[]))
             if any(x in ret for x in ('FAIL_SYS_USER_VALIDATE','FAIL_SYS_SESSION_EXPIRED','RGV587','FAIL_SYS_LOGIN')): restricted=True
             if main:
                 result=parse_detail(payload,item_id,bound)
                 if result: merge_result(found,result)
+                else:observed['unrecognized']+=1
             elif bound==item_id and isinstance(payload.get('data'),dict):
                 urls,text=description_fields(payload['data']);desc_images.extend(urls)
                 if urls: description_response=True
                 if text: desc_text=text
-        except (ValueError,TypeError,BrowserError): return
+        except (ValueError,TypeError,BrowserError):
+            observed['unreadable']+=1
+            return
     page.on('response',response_handler)
     try:
         page.goto('https://item.taobao.com/item.htm?id='+quote(item_id,safe=''),wait_until='domcontentloaded',timeout=30000)
@@ -154,7 +175,11 @@ def collect(context: object, item_id: str) -> dict:
                 found.update(detail_status='partial',detail_error='已保存可见详情图，未取得完整描述响应，无法确认图集完整；可补采重试')
             if restricted:found.update(detail_status='partial',auth_required=True,detail_error='已保留部分详情；平台要求登录或人工验证，请完成后重试')
             return found
-        return {'detail_status':'failed','auth_required':restricted,'detail_error':'淘宝详情需要登录或人工验证，请完成登录后重试' if restricted else '未取得匹配商品的淘宝详情：可能访问受限、商品下架或接口结构变化；保留已有主图'}
+        diagnostic=(f"后台未取得匹配详情：识别到详情响应 {observed['responses']} 次，"
+                    f"格式读取失败 {observed['unreadable']} 次，商品结构未匹配 {observed['unrecognized']} 次，"
+                    f"其他商品响应 {observed['other_item']} 次，HTTP 错误 {observed['http_errors']} 次。"
+                    '这不代表商品下架；请反馈此提示以定位后台登录或接口兼容问题，已有资料保留')
+        return {'detail_status':'failed','auth_required':restricted,'detail_error':'后台淘宝详情要求登录或人工验证；前台能打开不代表后台会话被接受，请完成验证后重试' if restricted else diagnostic}
     except BrowserError:
         if found:
             found.update(detail_status='partial',detail_error='已保留获取的图片；详情页面加载中断，请补采重试')

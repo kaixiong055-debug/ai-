@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 from webapp.store import Store
 
@@ -22,14 +23,20 @@ def test_gallery_type_persists_on_search_refresh(tmp_path: Path):
     store.upsert({k:v for k,v in p.items() if k not in ('gallery','image_kinds')},'k')
     assert store.gallery(pid)[1]['kind']=='sku'
 
-def test_taobao_browser_collects_lazy_description():
+@pytest.mark.parametrize('jsonp',[False,True])
+def test_taobao_browser_collects_lazy_description(jsonp):
     from webapp.taobao_details import collect
     from urllib.parse import urlencode
     class Response:
         def __init__(self,api,payload):
             self.url='https://h5api.m.taobao.com/h5/'+api+'/1.0/?'+urlencode({'data':'{"id":"42"}'})
             self.payload=payload
-        def json(self): return self.payload
+        def json(self):
+            if jsonp:raise ValueError('JSONP')
+            return self.payload
+        def text(self):
+            import json
+            return 'mtopjsonp1('+json.dumps(self.payload)+');'
     class EmptyLocator:
         @property
         def first(self): return self
@@ -76,3 +83,33 @@ def test_repeated_taobao_responses_keep_all_images():
     assert rich['gallery']==['a','b','c']
     assert rich['description']=='说明'
     assert rich['detail_status']=='collected' and rich['detail_error'] is None
+
+def test_taobao_jsonp_response_is_decoded_without_eval():
+    from webapp.taobao_details import response_payload
+    class Response:
+        def json(self):raise ValueError('not JSON')
+        def text(self):return 'mtopjsonp7({"data":{"item":{"itemId":"42","images":["//img.alicdn.com/a"]}}});'
+    assert response_payload(Response())['data']['item']['itemId']=='42'
+    class Invalid(Response):
+        def text(self):return 'alert(document.cookie);'
+    import pytest
+    with pytest.raises(ValueError):response_payload(Invalid())
+
+
+def test_taobao_failure_diagnostic_does_not_expose_response(monkeypatch):
+    import webapp.taobao_details as adapter
+    from unittest.mock import Mock
+    response=Mock(url='https://h5api.m.taobao.com/h5/mtop.taobao.pcdetail.data.get/1.0/',status=200)
+    response.json.return_value={'data':{'unknown':'private-account-value'}}
+    page=Mock(url='https://item.taobao.com/item.htm?id=42')
+    callbacks={}
+    page.on.side_effect=lambda event,callback:callbacks.update({event:callback})
+    page.goto.side_effect=lambda *a,**k:callbacks['response'](response)
+    page.is_closed.return_value=False
+    context=Mock();context.new_page.return_value=page
+    monkeypatch.setattr(adapter.time,'monotonic',Mock(side_effect=[0,30]))
+    result=adapter.collect(context,'42')
+    assert result['detail_status']=='failed'
+    assert '商品结构未匹配 1 次' in result['detail_error']
+    assert 'private-account-value' not in str(result)
+    page.close.assert_called_once()
