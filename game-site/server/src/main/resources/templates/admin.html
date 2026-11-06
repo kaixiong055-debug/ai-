@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN" xmlns:th="http://www.thymeleaf.org">
+<head>
+ <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="robots" content="noindex,nofollow">
+ <title>游戏管理 · 游选工作台</title><link rel="stylesheet" href="/admin/admin.css"><script src="/admin/admin.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">跳转到主要内容</a>
+<aside class="sidebar">
+ <a class="brand" href="/" target="_blank" rel="noopener"><span class="brand-symbol">游</span><span>游选<span class="brand-caption">内容管理工作台</span></span></a>
+ <div class="nav-caption">内容与发布</div>
+ <nav aria-label="管理菜单">
+  <button class="nav-item active" data-view="games" type="button"><span class="nav-icon">▦</span>游戏管理</button>
+  <button class="nav-item" data-view="import" type="button"><span class="nav-icon">↥</span>素材导入</button>
+  <button class="nav-item" data-view="settings" type="button"><span class="nav-icon">⚙</span>站点设置</button>
+ </nav>
+ <div class="sidebar-bottom"><a href="/" target="_blank" rel="noopener">访问网站 <span>↗</span></a><div class="account"><span class="account-avatar">管</span><div><strong id="account-name">管理员</strong><span>内容管理权限</span></div><form th:action="@{/logout}" method="post" id="logout-form"><button type="submit" class="text-button" aria-label="退出登录">退出</button></form></div></div>
+</aside>
+<div class="workspace">
+ <header class="topbar"><div><span class="eyebrow">CONTENT STUDIO</span><h1 id="view-title">游戏管理</h1></div><div class="top-actions"><form th:action="@{/logout}" method="post" id="mobile-logout-form" class="mobile-logout"><button type="submit" class="text-button">退出</button></form><a class="button quiet" href="/" target="_blank" rel="noopener">查看网站 ↗</a><button class="button primary" data-action="new" id="new-game" type="button">＋ 新建游戏</button></div></header>
+ <main id="main" tabindex="-1"><div id="notice" class="notice" role="status" aria-live="polite" hidden></div><div id="content"><div class="panel empty"><span class="loading-dot"></span><h2>正在加载工作台</h2><p>正在读取服务器上的游戏资料。</p></div></div></main>
+ <footer class="workspace-footer">游选 · 游戏内容管理<span>保存后可预览，发布后对访客开放</span></footer>
+</div>
+<noscript><p class="noscript">管理界面需要开启 JavaScript。公开游戏页不依赖 JavaScript 即可阅读。</p></noscript>
+</body></html>

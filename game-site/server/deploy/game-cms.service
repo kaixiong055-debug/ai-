@@ -1,0 +1,22 @@
+[Unit]
+Description=Game promotion website and CMS
+After=network.target
+
+[Service]
+Type=simple
+User=gamecms
+Group=gamecms
+WorkingDirectory=/www/wwwroot/game-cms
+EnvironmentFile=/www/wwwroot/game-cms/.env
+ExecStart=/usr/bin/java -Xms128m -Xmx512m -jar /www/wwwroot/game-cms/game-cms.jar
+Restart=on-failure
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/www/wwwroot/game-cms/data
+
+[Install]
+WantedBy=multi-user.target
