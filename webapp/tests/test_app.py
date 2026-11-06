@@ -414,3 +414,16 @@ def test_detail_mode_defaults_background_and_validates_opt_in(client,monkeypatch
     assert client.post('/api/details/collect',json={'ids':[1],'mode':'compatible'}).status_code==200
     assert start.call_args.args[1]['mode']=='compatible'
     assert client.post('/api/details/collect',json={'ids':[1],'mode':'automatic'}).status_code==422
+
+def test_tmall_original_url_reaches_detail_session(client,monkeypatch,tmp_path):
+    from unittest.mock import Mock
+    import webapp.tasks as tasks
+    (tmp_path/'state').mkdir();(tmp_path/'state'/'taobao_state.json').write_text('{}')
+    monkeypatch.setattr(tasks,'ROOT',tmp_path)
+    url='https://detail.tmall.com/item.htm?id=926199962521'
+    pid=client.app.state.store.upsert({'platform':'taobao','item_id':'926199962521','title':'商品','url':url},'k')
+    session=Mock();session.collect.return_value={'detail_status':'collected','description':'详情'}
+    monkeypatch.setattr('webapp.detail_session.DetailSession',Mock(return_value=session))
+    client.post('/api/details/collect',json={'ids':[pid]});client.app.state.tasks.thread.join(5)
+    assert session.collect.call_args.kwargs['url']==url
+    assert client.get('/api/tasks').json()[0]['status']=='completed'

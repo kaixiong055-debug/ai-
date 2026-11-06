@@ -43,7 +43,24 @@ class Description(HTMLParser):
 
 
 def description_fields(data: dict) -> tuple[list[str], str]:
-    content=data.get('pcDescContent') or data.get('desc') or data.get('description') or ''
+    content=data.get('pcDescContent') or data.get('wdescContent') or data.get('desc') or data.get('description') or ''
+    if isinstance(content,str) and content.lstrip().startswith('{'):
+        try:content=json.loads(content)
+        except ValueError:pass
+    if isinstance(content,dict) and isinstance(content.get('pages'),list):
+        images=[];texts=[]
+        for component in content['pages'][:500]:
+            if not isinstance(component,dict):continue
+            kind=component.get('componentType') or component.get('type')
+            value=component.get('content')
+            if kind in ('image','img'):
+                if isinstance(value,dict):value=value.get('url') or value.get('src')
+                if isinstance(value,str):
+                    value=normalize(value)
+                    if urlsplit(value).scheme=='https' and value not in images:images.append(value)
+            elif kind=='text' and isinstance(value,str):
+                parser=Description();parser.feed(value);texts.extend(parser.text)
+        return images,'\n'.join(texts)
     if isinstance(content,dict): content=content.get('content') or ''
     if not isinstance(content,str): return [],''
     parser=Description(); parser.feed(content)
@@ -115,7 +132,39 @@ def initial_details(page: object, item_id: str) -> dict:
     return found
 
 
-def collect(context: object, item_id: str) -> dict:
+def collect_product(context: object, item_id: str, url: str = '') -> dict:
+    result=collect(context,item_id,url=url)
+    if result.get('auth_required') or result.get('detail_status')=='collected':return result
+    # Same product, ordinary mobile web navigation. Never synthesize private API requests.
+    mobile=None
+    try:
+        mobile=context.browser.new_context(
+            storage_state=context.storage_state(),locale='zh-CN',
+            viewport={'width':393,'height':851},is_mobile=True,has_touch=True,
+            user_agent='Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36')
+        extra=collect(mobile,item_id,url=url)
+        if extra.get('gallery'):
+            if result.get('gallery'):merge_result(result,extra)
+            else:result=extra
+        if extra.get('auth_required'):
+            result.update(auth_required=True,detail_status='partial' if result.get('gallery') else 'failed',
+                          detail_error='手机网页需要登录或人工验证；已保存取得的数据，请完成验证后重试')
+        elif result.get('detail_status')!='collected':
+            result['detail_error']='电脑端及手机网页均未取得完整详情图；已保留实际返回数据。'+str(extra.get('detail_error') or '')
+        return result
+    except (BrowserError,OSError,ValueError):
+        result['detail_error']='手机网页补采未完成，已保留电脑端结果；请检查登录状态和网络后重试'
+        return result
+    finally:
+        if mobile:
+            try:mobile.close()
+            except BrowserError:pass
+
+
+def collect(context: object, item_id: str, url: str = '') -> dict:
+    from .selection import product_link
+    target=product_link(url or 'https://item.taobao.com/item.htm?id='+quote(item_id,safe=''))
+    if target['platform']!='taobao' or target['item_id']!=item_id:raise ValueError('原始商品链接与目标商品不匹配')
     page=context.new_page()
     found: dict={}
     desc_images: list[str]=[]
@@ -157,14 +206,17 @@ def collect(context: object, item_id: str) -> dict:
                 else:observed['unrecognized']+=1
             elif bound==item_id and isinstance(payload.get('data'),dict):
                 urls,text=description_fields(payload['data']);desc_images.extend(urls)
-                if urls: description_response=True
+                if urls:
+                    description_response=True
+                    merge_result(found,{'gallery':urls,'image_kinds':{image:'detail' for image in urls},
+                                        'description':text,'detail_status':'collected','detail_error':None})
                 if text: desc_text=text
         except (ValueError,TypeError,BrowserError):
             observed['unreadable']+=1
             return
     page.on('response',response_handler)
     try:
-        page.goto('https://item.taobao.com/item.htm?id='+quote(item_id,safe=''),wait_until='domcontentloaded',timeout=30000)
+        page.goto(target['url'],wait_until='domcontentloaded',timeout=30000)
         initial=initial_details(page,item_id)
         if initial:merge_result(found,initial)
         deadline=time.monotonic()+25
@@ -206,7 +258,7 @@ def collect(context: object, item_id: str) -> dict:
         parsed_page=urlsplit(page.url)
         page_state='登录页' if 'login' in (parsed_page.hostname or '') else (
             '验证页' if any(part in parsed_page.path.lower() for part in ('punish','captcha','verify')) else (
-                '目标商品地址' if parsed_page.hostname=='item.taobao.com' and parse_qs(parsed_page.query).get('id')==[item_id] else '其他地址'))
+                '目标商品地址' if parsed_page.hostname in ('item.taobao.com','detail.tmall.com') and parse_qs(parsed_page.query).get('id')==[item_id] else '其他地址'))
         if page_state in ('登录页','验证页'):restricted=True
         diagnostic=(f"后台页面：{page_state}；MTop 响应 {observed['mtop']} 次；"
                     f"接口名称：{', '.join(sorted(api_names)) or '未观察到'}。"

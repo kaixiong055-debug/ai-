@@ -103,7 +103,7 @@ class TaskManager:
                                 if session is None:
                                     session=DetailSession(self.store.root,platform,launch,self.picker,mode=payload.get('mode','background'))
                                     self.detail_sessions[platform]=session
-                                p.update(session.collect(p['item_id'],self.cancel))
+                                p.update(session.collect(p['item_id'],self.cancel,url=p['url']) if platform=='taobao' and p.get('url') else session.collect(p['item_id'],self.cancel))
                                 if self.cancel.is_set():break
                         self.store.upsert(p,p['keyword'])
                         with self.lock:

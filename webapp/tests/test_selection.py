@@ -117,3 +117,13 @@ def test_shop_navigation_during_scroll_keeps_original_source():
         discover(Page(),'xianyu',2,100,lambda items,rounds:updates.append(items))
     assert updates[-1][0]['source_url']=='https://www.goofish.com/personal?userId=1'
     assert len(updates[-1])==1
+
+def test_reimport_tmall_link_corrects_host_without_erasing_collected_data(tmp_path):
+    from webapp.store import Store
+    from webapp.selection import import_links
+    store=Store(tmp_path)
+    pid=store.upsert({'platform':'taobao','item_id':'42','title':'保留标题','description':'保留描述','url':'https://item.taobao.com/item.htm?id=42','detail_status':'partial'},'原关键词')
+    assert import_links(store,['https://detail.tmall.com/item.htm?id=42&from=cart'],'新关键词')==[pid]
+    product=store.selected([pid])[0]
+    assert product['url']=='https://detail.tmall.com/item.htm?id=42'
+    assert product['title']=='保留标题' and product['description']=='保留描述'

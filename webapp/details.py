@@ -77,11 +77,11 @@ def collect(context: object, item_id: str) -> dict:
             except BrowserError: restricted=True
 
 
-def collect_in_context(context: object, platform: str, item_id: str) -> dict:
+def collect_in_context(context: object, platform: str, item_id: str, url: str = '') -> dict:
     collector=collect
     if platform=='taobao':
-        from .taobao_details import collect as collector
-    try:return collector(context,item_id)
+        from .taobao_details import collect_product as collector
+    try:return collector(context,item_id,url=url) if platform=='taobao' and url else collector(context,item_id)
     except (BrowserError,OSError,ValueError):
         return {'detail_status':'failed','detail_error':'详情页面读取失败，请检查网络和平台状态'}
 

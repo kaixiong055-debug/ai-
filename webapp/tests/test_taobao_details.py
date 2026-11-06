@@ -151,3 +151,57 @@ def test_collects_initial_product_without_any_mtop_response(monkeypatch):
     assert result['description']=='商品介绍'
     assert result['image_kinds']['https://img.alicdn.com/detail']=='detail'
     page.close.assert_called_once()
+
+def test_tmall_detail_preserves_original_host_and_strips_tracking(monkeypatch):
+    import webapp.taobao_details as adapter
+    from unittest.mock import Mock
+    page=Mock(url='https://detail.tmall.com/item.htm?id=42')
+    page.evaluate.return_value=[{'item':{'itemId':'42','images':['//img.alicdn.com/main']},'pcDescContent':'<img src="//img.alicdn.com/detail">'}]
+    page.is_closed.return_value=False
+    context=Mock();context.new_page.return_value=page
+    monkeypatch.setattr(adapter.time,'monotonic',Mock(side_effect=[0,30]))
+    result=adapter.collect(context,'42',url='https://detail.tmall.com/item.htm?id=42&from=cart&mi_id=private')
+    assert result['detail_status']=='collected'
+    assert page.goto.call_args.args[0]=='https://detail.tmall.com/item.htm?id=42'
+
+@pytest.mark.parametrize('url',['https://detail.tmall.com/item.htm?id=43','https://evil.com/item.htm?id=42'])
+def test_detail_rejects_mismatched_or_untrusted_original_url(url):
+    from webapp.taobao_details import collect
+    from unittest.mock import Mock
+    context=Mock()
+    with pytest.raises(ValueError):collect(context,'42',url=url)
+    context.new_page.assert_not_called()
+
+def test_missing_desktop_details_uses_same_url_in_mobile_context(monkeypatch):
+    from unittest.mock import Mock
+    import webapp.taobao_details as adapter
+    context=Mock();mobile=context.browser.new_context.return_value
+    desktop={'gallery':['main'],'image_kinds':{'main':'gallery'},'detail_status':'partial','detail_error':'缺详情','description':''}
+    phone={'gallery':['desc'],'image_kinds':{'desc':'detail'},'detail_status':'collected','detail_error':None,'description':'手机详情'}
+    collector=Mock(side_effect=[desktop,phone]);monkeypatch.setattr(adapter,'collect',collector)
+    url='https://detail.tmall.com/item.htm?id=42'
+    result=adapter.collect_product(context,'42',url)
+    assert result['gallery']==['main','desc'] and result['detail_status']=='collected'
+    assert collector.call_args_list[1].args==(mobile,'42')
+    assert collector.call_args_list[1].kwargs['url']==url
+    assert context.browser.new_context.call_args.kwargs['is_mobile'] is True
+    mobile.close.assert_called_once()
+
+
+def test_auth_required_does_not_try_mobile_as_a_bypass(monkeypatch):
+    from unittest.mock import Mock
+    import webapp.taobao_details as adapter
+    context=Mock();result={'detail_status':'failed','auth_required':True,'detail_error':'需要登录'}
+    monkeypatch.setattr(adapter,'collect',Mock(return_value=result))
+    assert adapter.collect_product(context,'42')==result
+    context.browser.new_context.assert_not_called()
+
+def test_mobile_description_components_are_actual_detail_images():
+    import json
+    from webapp.taobao_details import description_fields
+    images,text=description_fields({'wdescContent':json.dumps({'pages':[
+        {'componentType':'image','content':'//img.alicdn.com/mobile.jpg'},
+        {'componentType':'text','content':'<p>手机图文详情</p>'},
+        {'componentType':'button','content':'//img.alicdn.com/not-detail.jpg'},
+        {'componentType':'image','content':'javascript:alert(1)'}]})})
+    assert images==['https://img.alicdn.com/mobile.jpg'] and text=='手机图文详情'

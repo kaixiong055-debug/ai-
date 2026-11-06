@@ -27,7 +27,7 @@ def main() -> int:
                 if command.get('id') and command['id']!=last:
                     last=command['id']
                     if command['action']=='close':break
-                    result=collect_in_context(context,platform,command['item_id'])
+                    result=collect_in_context(context,platform,command['item_id'],url=command['url']) if command.get('url') else collect_in_context(context,platform,command['item_id'])
                     if not snapshot.exists() and not result.get('auth_required'):
                         try:save_login(context,platform)
                         except Exception:pass  # Never expose cookie-bearing exception text.

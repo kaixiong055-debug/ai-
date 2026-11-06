@@ -54,6 +54,8 @@ def import_links(store: Store, urls: list[str], keyword: str, candidates: list[d
             old=c.execute('SELECT * FROM products WHERE platform=? AND item_id=?',(product['platform'],product['item_id'])).fetchone()
         if old:
             pid=old['id']
+            # Explicit re-import corrects the canonical source (e.g. Taobao -> Tmall), preserving collected fields.
+            with store.connect() as c:c.execute('UPDATE products SET url=? WHERE id=?',(product['url'],pid))
         else:
             meta=metadata.get(product['url'],{})
             product.update(title=(meta.get('title') or f'待采集商品 {product["item_id"]}')[:200],

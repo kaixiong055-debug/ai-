@@ -41,13 +41,18 @@ class DetailSession:
             self.snapshot.unlink(missing_ok=True)
             raise
 
-    def collect(self, item_id: str, cancel: object) -> dict:
+    def collect(self, item_id: str, cancel: object, url: str = '') -> dict:
+        if url:
+            from .selection import product_link
+            product=product_link(url)
+            if product['item_id']!=item_id or product['platform']!=self.platform:raise ValueError('原始链接与商品不匹配')
+            url=product['url']
         request_id=uuid.uuid4().hex
-        write_json(self.folder/'command.json',{'id':request_id,'action':'detail','item_id':item_id})
+        write_json(self.folder/'command.json',{'id':request_id,'action':'detail','item_id':item_id,'url':url})
         return self.wait_result(request_id,cancel)
 
     def wait_result(self, request_id: str, cancel: object) -> dict:
-        deadline=time.monotonic()+90
+        deadline=time.monotonic()+(180 if self.platform=='taobao' else 90)
         while not cancel.is_set() and time.monotonic()<deadline:
             try:
                 report=json.loads((self.folder/'result.json').read_text(encoding='utf-8'))

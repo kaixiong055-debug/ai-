@@ -27,7 +27,7 @@
    if(match){let value=literal(text.slice(match.index+match[0].length));if(typeof value==='string'){try{value=JSON.parse(value)}catch{value=null}}if(value)roots.push(value);}
   }
  }
- function textValue(v){return typeof v==='string'?v.slice(0,1000000):v&&typeof v.content==='string'?{content:v.content.slice(0,1000000)}:'';}
+ function textValue(v){if(v&&Array.isArray(v.pages))return {pages:v.pages.slice(0,500).map(p=>({componentType:p.componentType,type:p.type,content:typeof p.content==='string'?p.content.slice(0,1000000):{url:p.content?.url,src:p.content?.src}}))};return typeof v==='string'?v.slice(0,1000000):v&&typeof v.content==='string'?{content:v.content.slice(0,1000000)}:'';}
  const stack=roots.map(value=>({value,depth:0}));let visited=0;
  while(stack.length&&visited++<12000&&results.length<30){
   let {value:v,depth}=stack.pop();if(depth>18)continue;
@@ -36,7 +36,7 @@
   const item=v.item;
   if(item&&typeof item==='object'&&String(item.itemId||item.id||'')===itemId&&Array.isArray(item.images)){
    const clean={item:{itemId,title:typeof item.title==='string'?item.title.slice(0,200):'',images:item.images.slice(0,300).map(i=>typeof i==='string'?i:{url:i?.url||i?.image})}};
-   for(const key of ['pcDescContent','desc','description']){clean[key]=textValue(v[key]);clean.item[key]=textValue(item[key]);}
+   for(const key of ['pcDescContent','wdescContent','desc','description']){clean[key]=textValue(v[key]);clean.item[key]=textValue(item[key]);}
    if(Array.isArray(v.skuBase?.props))clean.skuBase={props:v.skuBase.props.slice(0,100).map(p=>({values:Array.isArray(p.values)?p.values.slice(0,500).map(i=>({image:i.image})):[]}))};
    results.push(clean);
   }
