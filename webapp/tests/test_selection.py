@@ -83,6 +83,7 @@ def test_link_only_item_gets_cover_after_details(tmp_path):
 def test_picker_login_state_is_saved_privately(tmp_path):
     from webapp.picker import save_login
     class Context:
+        pages=[]
         def cookies(self): return [{'name':'unb','value':'private-value','domain':'.taobao.com','expires':-1}]
         def storage_state(self,path):
             from pathlib import Path
@@ -93,6 +94,7 @@ def test_picker_login_state_is_saved_privately(tmp_path):
 def test_picker_rejects_expired_or_wrong_domain_login(tmp_path):
     from webapp.picker import save_login
     class Context:
+        pages=[]
         def cookies(self): return [{'name':'unb','value':'private','domain':'.evil.com','expires':-1},{'name':'unb','value':'old','domain':'.taobao.com','expires':1}]
     assert not save_login(Context(),'taobao',tmp_path)
     assert not (tmp_path/'state').exists()

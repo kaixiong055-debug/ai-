@@ -12,7 +12,9 @@ def main() -> int:
     folder=Path(sys.argv[1]);platform=sys.argv[2]
     with sync_playwright() as pw:
         browser=pw.chromium.launch(headless=True)
-        context=browser.new_context(storage_state=str(ROOT/'state'/f'{platform}_state.json'),locale='zh-CN')
+        snapshot=folder/'state.json'
+        state=snapshot if snapshot.exists() else ROOT/'state'/f'{platform}_state.json'
+        context=browser.new_context(storage_state=str(state),locale='zh-CN')
         # Keep images/scripts/XHR available for lazy detail extraction; skip only nonessential media/fonts.
         context.route('**/*',lambda route:route.abort() if route.request.resource_type in ('media','font') else route.continue_())
         last=''
@@ -24,7 +26,7 @@ def main() -> int:
                     last=command['id']
                     if command['action']=='close':break
                     result=collect_in_context(context,platform,command['item_id'])
-                    if not result.get('auth_required'):
+                    if not snapshot.exists() and not result.get('auth_required'):
                         try:save_login(context,platform)
                         except Exception:pass  # Never expose cookie-bearing exception text.
                     write_json(folder/'result.json',{'request_id':last,'result':result})

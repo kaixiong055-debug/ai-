@@ -16,6 +16,22 @@ def write_json(path: Path, data: dict) -> None:
     temporary.replace(path)
 
 
+def capture_state(context: object, existing: Path) -> dict:
+    """Read existing tabs only: Playwright storage_state may create helper tabs."""
+    try:
+        previous=json.loads(existing.read_text(encoding='utf-8'))
+        origins={entry['origin']:entry for entry in previous.get('origins',[])}
+    except (OSError,ValueError,KeyError,TypeError):origins={}
+    for tab in context.pages:
+        try:
+            page_link(tab.url)
+            entry=tab.evaluate("""() => ({origin:location.origin,localStorage:
+                Object.keys(localStorage).map(name=>({name,value:localStorage.getItem(name)}))})""")
+            if entry['origin'].startswith('https://'):origins[entry['origin']]=entry
+        except (ValueError,KeyError,TypeError,BrowserError):continue
+    return {'cookies':context.cookies(),'origins':list(origins.values())}
+
+
 def save_login(context: object, platform: str, root: Path = ROOT) -> bool:
     domains=('taobao.com','tmall.com') if platform=='taobao' else ('goofish.com','taobao.com')
     valid=False
@@ -30,7 +46,7 @@ def save_login(context: object, platform: str, root: Path = ROOT) -> bool:
     target=state/f'{platform}_state.json'
     temporary=state/f'{platform}_picker.tmp'
     try:
-        context.storage_state(path=str(temporary))
+        temporary.write_text(json.dumps(capture_state(context,target),ensure_ascii=False),encoding='utf-8')
         temporary.replace(target)
     finally:
         temporary.unlink(missing_ok=True)
@@ -114,9 +130,6 @@ def main() -> int:
             state.update(status='ready',message='请在平台窗口浏览商品或店铺，再回管理页面读取；可选择标签页')
             last='';pages={};tick=0
             while browser.is_connected() and context.pages:
-                if tick%20==0:
-                    try:save_login(context,platform)
-                    except (OSError,BrowserError):pass
                 if tick%4==0:
                     for tab in context.pages:
                         if not tab.is_closed() and tab not in pages.values():
@@ -144,15 +157,14 @@ def main() -> int:
                                 try:save_login(context,platform)
                                 except (OSError,BrowserError):pass
                                 break
-                            if cmd['action']=='detail':
-                                from .details import collect_in_context
-                                result=collect_in_context(context,platform,cmd['item_id'])
-                                if not result.get('auth_required'):
-                                    try:save_login(context,platform)
-                                    except (OSError,BrowserError):pass
-                                state.update(status='ready',message='单件详情已处理；结果已保存到商品库任务')
+                            if cmd['action']=='export_state':
+                                # Private command only: no credentials are returned in the HTTP status.
+                                destination=Path(cmd['destination'])
+                                temporary=destination.with_suffix('.tmp')
+                                temporary.write_text(json.dumps(capture_state(context,login),ensure_ascii=False),encoding='utf-8')
+                                temporary.replace(destination)
+                                state.update(status='ready',message='登录状态已同步；详情在后台采集，不操作当前窗口')
                                 write_json(status,state)
-                                write_json(folder/'result.json',{'request_id':last,'result':result})
                                 continue
                             if cmd['action']=='open_product':
                                 product=product_link(cmd['url'])

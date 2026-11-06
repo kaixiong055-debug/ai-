@@ -1,4 +1,4 @@
-"""One browser context per platform batch, or lease the live selection context."""
+"""A headless context per batch; visible browser only supplies a private login snapshot."""
 from __future__ import annotations
 import json
 import sys
@@ -14,29 +14,35 @@ class DetailSession:
         self.platform=platform
         self.picker=picker
         self.closed=False
-        self.borrowed=False
+        self.leased=False
         self.proc=None
-        if picker:
-            with picker.lock:
-                if picker.proc and picker.proc.poll() is None and picker.platform==platform:
-                    if picker.status()['status']!='ready' or picker.leased:
-                        raise ValueError('选品浏览器正在操作，请等待完成后再采集详情')
-                    picker.leased=True
-                    self.borrowed=True
-                    self.folder=picker.folder
-                    self.proc=picker.proc
-        if not self.borrowed:
-            self.folder=root/'detail-sessions'/uuid.uuid4().hex
-            self.folder.mkdir(parents=True)
+        self.folder=root/'detail-sessions'/uuid.uuid4().hex
+        self.folder.mkdir(parents=True)
+        self.snapshot=self.folder/'state.json'
+        try:
+            if picker:
+                with picker.lock:
+                    if picker.proc and picker.proc.poll() is None and picker.platform==platform:
+                        if picker.status()['status']!='ready' or picker.leased:
+                            raise ValueError('选品浏览器正在操作，请等待完成后再采集详情')
+                        picker.leased=True
+                        self.leased=True
+                        picker.send({'action':'export_state','destination':str(self.snapshot)},internal=True)
+                        deadline=time.monotonic()+10
+                        while not self.snapshot.exists():
+                            if picker.proc.poll() is not None or time.monotonic()>deadline:
+                                raise ValueError('登录状态同步失败，请保存登录状态后重试')
+                            time.sleep(.05)
             self.proc=launch([sys.executable,'-m','webapp.detail_worker',str(self.folder),platform])
+        except Exception:
+            if self.leased:
+                with picker.lock:picker.leased=False
+            self.snapshot.unlink(missing_ok=True)
+            raise
 
     def collect(self, item_id: str, cancel: object) -> dict:
         request_id=uuid.uuid4().hex
-        command={'id':request_id,'action':'detail','item_id':item_id}
-        if self.borrowed:
-            self.picker.send(command,internal=True)
-            request_id=self.picker.pending
-        else: write_json(self.folder/'command.json',command)
+        write_json(self.folder/'command.json',{'id':request_id,'action':'detail','item_id':item_id})
         return self.wait_result(request_id,cancel)
 
     def wait_result(self, request_id: str, cancel: object) -> dict:
@@ -55,10 +61,12 @@ class DetailSession:
     def close(self) -> None:
         if self.closed:return
         self.closed=True
-        if self.borrowed:
-            with self.picker.lock:self.picker.leased=False
-        elif self.proc:
-            # Graceful shutdown flushes refreshed cookies before terminating a stuck worker.
-            write_json(self.folder/'command.json',{'id':uuid.uuid4().hex,'action':'close'})
-            try:self.proc.wait(timeout=3)
-            except Exception:terminate(self.proc)
+        try:
+            if self.proc and self.proc.poll() is None:
+                write_json(self.folder/'command.json',{'id':uuid.uuid4().hex,'action':'close'})
+                try:self.proc.wait(timeout=3)
+                except Exception:terminate(self.proc)
+        finally:
+            self.snapshot.unlink(missing_ok=True)
+            if self.leased:
+                with self.picker.lock:self.picker.leased=False
