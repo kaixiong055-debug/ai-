@@ -70,3 +70,17 @@ def test_state_snapshot_reads_existing_tabs_without_creating_helper_pages(tmp_pa
     assert len(result['origins'])==2 and result['cookies']==context.cookies.return_value
     context.new_page.assert_not_called()
     context.storage_state.assert_not_called()
+
+@pytest.mark.parametrize('mode,headless',[('background',True),('compatible',False)])
+def test_worker_browser_mode_is_explicit(tmp_path,monkeypatch,mode,headless):
+    import sys,json
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    from webapp import detail_worker
+    (tmp_path/'command.json').write_text(json.dumps({'id':'stop','action':'close'}))
+    launch=Mock();browser=launch.return_value
+    monkeypatch.setattr(detail_worker,'sync_playwright',lambda:nullcontext(SimpleNamespace(chromium=SimpleNamespace(launch=launch))))
+    monkeypatch.setattr(sys,'argv',['worker',str(tmp_path),'xianyu',mode])
+    assert detail_worker.main()==0
+    assert launch.call_args.kwargs['headless'] is headless
+    browser.close.assert_called_once()

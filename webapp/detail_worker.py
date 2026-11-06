@@ -10,13 +10,15 @@ from .picker import write_json, save_login
 
 def main() -> int:
     folder=Path(sys.argv[1]);platform=sys.argv[2]
+    mode=sys.argv[3] if len(sys.argv)>3 else 'background'
+    if mode not in ('background','compatible'):raise ValueError('详情采集模式无效')
     with sync_playwright() as pw:
-        browser=pw.chromium.launch(headless=True)
+        browser=pw.chromium.launch(headless=mode=='background')
         snapshot=folder/'state.json'
         state=snapshot if snapshot.exists() else ROOT/'state'/f'{platform}_state.json'
         context=browser.new_context(storage_state=str(state),locale='zh-CN')
-        # Keep images/scripts/XHR available for lazy detail extraction; skip only nonessential media/fonts.
-        context.route('**/*',lambda route:route.abort() if route.request.resource_type in ('media','font') else route.continue_())
+        # Match the original working loading behavior; do not intercept site requests.
+        if mode=='compatible':context.new_page()  # Keep one window alive for the batch.
         last=''
         try:
             while True:

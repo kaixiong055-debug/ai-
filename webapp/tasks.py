@@ -64,7 +64,9 @@ class TaskManager:
             self.active={'id':uuid.uuid4().hex,'kind':kind,'status':'running','created_at':now(),
                          'completed':0,'total':len(payload['ids']) if kind in ('images','details') else len(payload['keywords'])*len(payload['platforms']),
                          'counts':{},'failures':[],'message':'准备开始'}
-            if kind=='details': self.active['item_states']={str(pid):'queued' for pid in payload['ids']}
+            if kind=='details':
+                self.active['item_states']={str(pid):'queued' for pid in payload['ids']}
+                self.active['collection_mode']=payload.get('mode','background')
             self.store.save_task(self.active)
             self.thread=threading.Thread(target=self.run,args=(kind,payload),daemon=True)
             self.thread.start()
@@ -99,7 +101,7 @@ class TaskManager:
                                 previous_start=time.monotonic()
                                 session=self.detail_sessions.get(platform)
                                 if session is None:
-                                    session=DetailSession(self.store.root,platform,launch,self.picker)
+                                    session=DetailSession(self.store.root,platform,launch,self.picker,mode=payload.get('mode','background'))
                                     self.detail_sessions[platform]=session
                                 p.update(session.collect(p['item_id'],self.cancel))
                                 if self.cancel.is_set():break

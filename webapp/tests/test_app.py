@@ -404,3 +404,13 @@ def test_detail_batch_reuses_session_and_saves_each_product(client,monkeypatch,t
     assert factory.call_count==1 and session.collect.call_count==2
     assert client.get('/api/tasks').json()[0]['status']=='completed'
     assert store.selected([ids[1]])[0]['description']=='详情2'
+
+def test_detail_mode_defaults_background_and_validates_opt_in(client,monkeypatch):
+    from unittest.mock import Mock
+    start=Mock(return_value={'status':'running'})
+    monkeypatch.setattr(client.app.state.tasks,'start',start)
+    assert client.post('/api/details/collect',json={'ids':[1]}).status_code==200
+    assert start.call_args.args[1]['mode']=='background'
+    assert client.post('/api/details/collect',json={'ids':[1],'mode':'compatible'}).status_code==200
+    assert start.call_args.args[1]['mode']=='compatible'
+    assert client.post('/api/details/collect',json={'ids':[1],'mode':'automatic'}).status_code==422

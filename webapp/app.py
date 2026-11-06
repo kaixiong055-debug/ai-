@@ -29,6 +29,10 @@ from .picker_session import PickerSession
 class Selection(BaseModel):
     ids: list[int] = Field(min_length=1,max_length=1000)
 
+class DetailSelection(Selection):
+    mode: Literal['background','compatible'] = 'background'
+
+
 class Search(BaseModel):
     keywords: list[str] = Field(min_length=1,max_length=20)
     platforms: list[str] = Field(min_length=1,max_length=2)
@@ -190,7 +194,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
         except (ValueError,OSError,http.client.HTTPException) as exc:
             raise HTTPException(502,'预览暂不可用，可选择下载重试查看原因') from exc
     @app.post('/api/details/collect')
-    def collect_details(selection: Selection) -> dict:
+    def collect_details(selection: DetailSelection) -> dict:
         try: return tasks.start('details',selection.model_dump())
         except ValueError as exc: raise HTTPException(409,str(exc)) from exc
     @app.post('/api/gallery/download')

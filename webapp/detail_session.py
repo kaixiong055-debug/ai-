@@ -10,7 +10,8 @@ from .tasks import terminate
 
 
 class DetailSession:
-    def __init__(self, root: Path, platform: str, launch: object, picker: object = None) -> None:
+    def __init__(self, root: Path, platform: str, launch: object, picker: object = None, mode: str = 'background') -> None:
+        if mode not in ('background','compatible'):raise ValueError('详情采集模式无效')
         self.platform=platform
         self.picker=picker
         self.closed=False
@@ -33,7 +34,7 @@ class DetailSession:
                             if picker.proc.poll() is not None or time.monotonic()>deadline:
                                 raise ValueError('登录状态同步失败，请保存登录状态后重试')
                             time.sleep(.05)
-            self.proc=launch([sys.executable,'-m','webapp.detail_worker',str(self.folder),platform])
+            self.proc=launch([sys.executable,'-m','webapp.detail_worker',str(self.folder),platform,mode])
         except Exception:
             if self.leased:
                 with picker.lock:picker.leased=False
