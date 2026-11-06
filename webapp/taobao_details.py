@@ -4,6 +4,7 @@ import json
 import re
 import time
 from html.parser import HTMLParser
+from pathlib import Path
 from urllib.parse import parse_qs, quote, urlsplit
 from playwright.sync_api import Error as BrowserError
 from .details import normalize
@@ -99,6 +100,21 @@ def request_item(url: str) -> str:
     except (ValueError,TypeError): return ''
 
 
+INITIAL_DATA_SCRIPT=Path(__file__).with_name('taobao_initial.js').read_text(encoding='utf-8')
+
+
+def initial_details(page: object, item_id: str) -> dict:
+    found={}
+    try:
+        candidates=page.evaluate(INITIAL_DATA_SCRIPT,{'itemId':item_id})
+        if not isinstance(candidates,list):return found
+        for data in candidates:
+            result=parse_detail({'data':data},item_id)
+            if result:merge_result(found,result)
+    except (BrowserError,ValueError,TypeError):pass
+    return found
+
+
 def collect(context: object, item_id: str) -> dict:
     page=context.new_page()
     found: dict={}
@@ -149,10 +165,14 @@ def collect(context: object, item_id: str) -> dict:
     page.on('response',response_handler)
     try:
         page.goto('https://item.taobao.com/item.htm?id='+quote(item_id,safe=''),wait_until='domcontentloaded',timeout=30000)
+        initial=initial_details(page,item_id)
+        if initial:merge_result(found,initial)
         deadline=time.monotonic()+25
         while time.monotonic()<deadline and not found and not restricted:
             if 'login' in (urlsplit(page.url).hostname or ''): restricted=True;break
             page.wait_for_timeout(500)
+            initial=initial_details(page,item_id)
+            if initial:merge_result(found,initial)
         if found:
             # Only inspect known description containers after the item's identity was verified.
             # Bounded lazy-load observation. DOM stability is not proof that all images exist.

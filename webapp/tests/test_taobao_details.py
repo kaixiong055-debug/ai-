@@ -47,6 +47,7 @@ def test_taobao_browser_collects_lazy_description(jsonp,main_api,monkeypatch):
     class Page:
         wheels=0
         url='https://item.taobao.com/item.htm?id=42'
+        def evaluate(self,*args):return []
         def on(self,event,callback): self.callback=callback
         def goto(self,url,**kwargs):
             assert url==self.url
@@ -136,3 +137,17 @@ def test_unknown_api_requires_explicit_matching_product_id(monkeypatch,returned_
     assert result['detail_status']=='failed' and not result.get('gallery')
     assert 'MTop 响应 1 次' in result['detail_error']
     assert '目标商品地址' in result['detail_error']
+
+def test_collects_initial_product_without_any_mtop_response(monkeypatch):
+    import webapp.taobao_details as adapter
+    from unittest.mock import Mock
+    page=Mock(url='https://item.taobao.com/item.htm?id=42')
+    page.evaluate.return_value=[{'item':{'itemId':'42','title':'初始商品','images':['//img.alicdn.com/main']},'pcDescContent':'<p>商品介绍</p><img src="//img.alicdn.com/detail">'}]
+    page.is_closed.return_value=False
+    context=Mock();context.new_page.return_value=page
+    monkeypatch.setattr(adapter.time,'monotonic',Mock(side_effect=[0,30]))
+    result=adapter.collect(context,'42')
+    assert result['detail_status']=='collected' and result['title']=='初始商品'
+    assert result['description']=='商品介绍'
+    assert result['image_kinds']['https://img.alicdn.com/detail']=='detail'
+    page.close.assert_called_once()
