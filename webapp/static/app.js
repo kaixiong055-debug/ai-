@@ -4,7 +4,7 @@ let current=0,page=1,total=0,rows=[],mode='cards',selected=new Set(),drafts=[],e
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const statusNames={pending:'待下载',downloaded:'已下载',failed:'下载失败',running:'运行中',completed:'已完成',completed_with_errors:'已结束（有失败）',stopped:'已停止',stopping:'停止中',interrupted:'已中断'};
 function notice(s){$('#notice').textContent=s;}
-async function api(path,method='GET',data){const r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Local-Tool':'1'},body:data===undefined?undefined:JSON.stringify(data)});if(!r.ok){let e;try{e=await r.json()}catch{e={detail:'请求失败'}}throw Error(typeof e.detail==='string'?e.detail:'输入数据无效，请检查填写内容')}return r;}
+async function api(path,method='GET',data){const r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json','X-Local-Tool':'1'},body:data===undefined?undefined:JSON.stringify(data)});if(!r.ok){let e;try{e=await r.json()}catch{e={detail:'请求失败'}}throw Error(typeof e.detail==='string'?e.detail:'输入数据无效，请检查填写内容')}if(method!=='GET'){taskSignature=null;poller.wake()}return r;}
 async function json(path,method,data){return (await api(path,method,data)).json()}
 function safeLink(url){try{const u=new URL(url);return ['http:','https:'].includes(u.protocol)?u.href:'#'}catch{return '#'}}
 function imageLabel(p){if(p.image_count>1)return `图集 ${p.image_count} 张 · 已下载 ${p.downloaded_count} 张`;return p.image_status==='downloaded'?'已下载 · 本地图片':!p.image_url?'无主图地址':p.image_status==='failed'?'下载失败 · 可重试':'可下载 · 在线预览'}
@@ -23,8 +23,8 @@ async function action(type,ids=[...selected]){if(!ids.length)throw Error('请先
  if(type==='csv'||type==='zip'){const r=await api('/export/'+type,'POST',{ids});const u=URL.createObjectURL(await r.blob());const a=document.createElement('a');a.href=u;a.download='products.'+type;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);return}
  if(type==='delete'&&!confirm('删除选中记录？已下载文件和独立草稿会保留。'))return;
  await json(({download:'/images/download',retry:'/images/download',draft:'/drafts',delete:'/products/delete',details:'/details/collect'})[type],'POST',{ids});notice(type==='download'||type==='retry'?'下载任务已开始，请查看任务进度':type==='details'?'后台详情采集已开始，请查看任务进度':'操作已完成');if(type==='delete')selected.clear();await load();await poll();}
-async function taskHtml(){const ts=await json('/tasks');return ts.map(t=>`<div class="task"><strong>${escape(t.kind==='crawl'?'商品采集':t.kind==='details'?'详情与图集采集':'图片下载')} · ${escape(statusNames[t.status]||t.status)}</strong><p>${escape(t.message)} · ${t.completed}/${t.total}</p><span class="muted">${escape(t.created_at)} · ${escape(JSON.stringify(t.counts))}</span><pre>${escape(t.failures.map(f=>`${names[f.platform]||f.item_id||''} ${f.keyword||''}：${f.error}`).join('\n'))}</pre></div>`).join('')||'<p class="empty">暂无历史任务</p>'}
-async function show(i){current=i;$('#title').textContent=views[i];document.querySelectorAll('nav button').forEach((b,n)=>b.classList.toggle('active',i===n));$('#search').hidden=i!==0;$('#selectionPanel').hidden=i!==0;$('#products').hidden=i>2;$('#other').hidden=i<=2;if(i<=2){await load();return}const other=$('#other');
+async function taskHtml(ts){ts=ts||await json('/tasks');return ts.map(t=>`<div class="task"><strong>${escape(t.kind==='crawl'?'商品采集':t.kind==='details'?'详情与图集采集':'图片下载')} · ${escape(statusNames[t.status]||t.status)}</strong><p>${escape(t.message)} · ${t.completed}/${t.total}</p><span class="muted">${escape(t.created_at)} · ${escape(JSON.stringify(t.counts))}</span><pre>${escape(t.failures.map(f=>`${names[f.platform]||f.item_id||''} ${f.keyword||''}：${f.error}`).join('\n'))}</pre></div>`).join('')||'<p class="empty">暂无历史任务</p>'}
+async function show(i,wake=true){current=i;if(i===0)taskSignature=null;if(wake)poller.wake();$('#title').textContent=views[i];document.querySelectorAll('nav button').forEach((b,n)=>b.classList.toggle('active',i===n));$('#search').hidden=i!==0;$('#selectionPanel').hidden=i!==0;$('#products').hidden=i>2;$('#other').hidden=i<=2;if(i<=2){await load();return}const other=$('#other');
  if(i===5){other.innerHTML='<div class="panel"><h2>任务记录</h2>'+await taskHtml()+'</div>';return}
  if(i===6){const accounts=await json('/accounts');other.innerHTML='<div class="panel"><h2>平台账号</h2><p class="muted">登录窗口会在运行本工具的电脑打开。手动扫码或完成验证，状态文件不会发送到页面。</p>'+accounts.map(a=>`<div class="account"><div><strong>${names[a.platform]}</strong><p>${escape(a.status)}</p></div><button data-login="${a.platform}" class="primary">打开登录窗口</button></div>`).join('')+'</div>';return}
  if(i===7){const s=await json('/settings');other.innerHTML=`<div class="panel"><h2>系统设置</h2><p>监听地址：${escape(s.binding)}</p><p>存储位置：${escape(s.storage)}</p><p>图片大小上限：${s.max_image_mb} MB</p><p>主图：支持；淘宝 / 闲鱼：支持补采；淘宝 SKU 和详情图按实际返回数据分类</p><p class="muted">备份前请关闭服务，再复制 data/webapp。账号文件位于 state，请单独妥善保管。</p></div>`;return}
@@ -33,20 +33,38 @@ async function show(i){current=i;$('#title').textContent=views[i];document.query
  other.innerHTML=`<div class="panel"><h2>${views[i]}</h2>${adapters}${cards}</div>`;
 }
 function edit(id){editing=drafts.find(d=>d.id===id);const f=$('#draftForm');for(const key of ['title','description','price','stock','category'])f.elements[key].value=editing[key]??'';for(const key of ['sku','logistics','platform_fields'])f.elements[key].value=JSON.stringify(editing[key],null,2);f.elements.images.value=editing.images.join('\n');f.querySelectorAll('[name=target]').forEach(c=>c.checked=editing.platforms.includes(c.value));$('#editor').showModal()}
-async function poll(){if(current===0)await refreshPicker();const ts=await json('/tasks'),t=ts[0];if(t){$('#progress').innerHTML=`<strong>${escape(t.message)}</strong><div>已完成 ${t.completed}/${t.total} 个工作单元 · ${escape(statusNames[t.status]||t.status)} · ${escape(Object.entries(t.counts).map(([p,n])=>`${names[p]} ${n} 件`).join(' / '))}</div><progress value="${t.completed}" max="${t.total||1}"></progress><div>${escape(t.failures.map(f=>`${names[f.platform]||f.item_id||''}：${f.error}`).join('；'))}</div>${['running','stopping'].includes(t.status)?'<button id="stop">停止任务</button>':''}`;if(current<=2)await load()}if(current===5||current===6)await show(current)}
+let taskSignature=null, productRevision=null, pickerStatus='closed';
+const poller=createPoller({refresh:refreshStatus,hidden:()=>document.hidden,error:e=>notice(e.message)});
+function poll(){return poller.poll()}
+async function refreshStatus(){
+ const ts=await json('/tasks'),t=ts[0],signature=JSON.stringify(ts);
+ if(document.hidden)return 30000;
+ const changed=signature!==taskSignature;
+ const busy=ts.some(task=>['running','stopping'].includes(task.status));
+ if(current===0&&(changed||['ready','busy','starting'].includes(pickerStatus)))await refreshPicker();
+ if(t&&changed){$('#progress').innerHTML=`<strong>${escape(t.message)}</strong><div>已完成 ${t.completed}/${t.total} 个工作单元 · ${escape(statusNames[t.status]||t.status)} · ${escape(Object.entries(t.counts).map(([p,n])=>`${names[p]} ${n} 件`).join(' / '))}</div><progress value="${t.completed}" max="${t.total||1}"></progress><div>${escape(t.failures.map(f=>`${names[f.platform]||f.item_id||''}：${f.error}`).join('；'))}</div>${['running','stopping'].includes(t.status)?'<button id="stop">停止任务</button>':''}`;}
+ const revision=JSON.stringify(ts.map(task=>[task.id,task.status,task.completed,task.counts,task.item_states]));
+ if(current<=2&&productRevision!==null&&revision!==productRevision)await load();
+ if(current===5&&changed)$('#other').innerHTML='<div class="panel"><h2>任务记录</h2>'+await taskHtml(ts)+'</div>';
+ if(current===6)await show(6,false);
+ taskSignature=signature;productRevision=revision;
+ return busy||(current===0&&['ready','busy','starting'].includes(pickerStatus))||current===6?3000:30000;
+}
+ document.addEventListener('visibilitychange',()=>{if(document.hidden)poller.pause();else poller.wake()});
+
 function run(fn){return (...args)=>Promise.resolve().then(()=>fn(...args)).catch(e=>notice(e.message))}
 $('#nav').innerHTML=views.map((v,i)=>`<button data-view="${i}" class="${i===0?'active':''}">${v}</button>`).join('');
 document.addEventListener('click',run(async e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.collect){await action('details',[+b.dataset.collect]);notice('已开始补采详情，完成后点击刷新状态')}if(b.id==='selectGallery')document.querySelectorAll('.gallery-check').forEach(c=>c.checked=true);if(b.id==='downloadGallery'){const ids=[...document.querySelectorAll('.gallery-check:checked')].map(c=>+c.value);if(!ids.length)throw Error('请先勾选图片');await json('/gallery/download','POST',{ids});notice('已开始下载勾选图片，完成后点击刷新状态')}if(b.id==='refreshDetail')await showDetail(detailId);if(b.dataset.detail)await showDetail(+b.dataset.detail);if(b.dataset.imageFilter!==undefined){$('#statusFilter').value=b.dataset.imageFilter;page=1;selected.clear();await load()}if(b.dataset.view!==undefined)await show(+b.dataset.view);if(b.dataset.action)await action(b.dataset.action);if(b.dataset.download)await action('download',[+b.dataset.download]);if(b.dataset.login){await json(`/accounts/${b.dataset.login}/login`,'POST',{});await show(6)}if(b.dataset.edit)edit(+b.dataset.edit);if(b.dataset.validate){const d=drafts.find(x=>x.id===+b.dataset.validate);if(!d.platforms.length)throw Error('请先编辑草稿选择目标平台');const result=await Promise.all(d.platforms.map(async p=>{const r=await json(`/publish/${p}/validate`,'POST',d);return names[p]+': '+(r.errors.join('；')||'基础资料校验通过')+' · '+r.message}));notice(result.join('\n'))}if(b.id==='stop'){await json('/tasks/stop','POST',{});await poll()}}));
 $('#searchForm').addEventListener('submit',run(async e=>{e.preventDefault();await json('/tasks','POST',{keywords:$('#keywords').value.split(/[,，\n]/).map(x=>x.trim()).filter(Boolean),platforms:[...document.querySelectorAll('[name=platform]:checked')].map(x=>x.value),pages:+$('#pages').value});notice('任务已启动');await poll()}));
 $('#listing').addEventListener('change',e=>{if(e.target.matches('.item-check')){const id=+e.target.dataset.id;e.target.checked?selected.add(id):selected.delete(id);draw()}});$('#selectPage').onchange=e=>{rows.forEach(p=>e.target.checked?selected.add(p.id):selected.delete(p.id));draw()};$('#cards').onclick=()=>{mode='cards';draw()};$('#table').onclick=()=>{mode='table';draw()};$('#apply').onclick=run(async()=>{page=1;selected.clear();await load()});$('#prev').onclick=run(async()=>{page--;await load()});$('#next').onclick=run(async()=>{page++;await load()});$('#closeDetail').onclick=()=>$('#productDetail').close();$('#closeEditor').onclick=()=>$('#editor').close();
 $('#draftForm').addEventListener('submit',run(async e=>{e.preventDefault();const f=e.target;const d={...editing,title:f.elements.title.value,description:f.elements.description.value,price:f.elements.price.value===''?null:+f.elements.price.value,stock:+f.elements.stock.value,category:f.elements.category.value,images:f.elements.images.value.split('\n').filter(Boolean),platforms:[...f.querySelectorAll('[name=target]:checked')].map(c=>c.value)};for(const k of ['sku','logistics','platform_fields'])d[k]=JSON.parse(f.elements[k].value);await json('/drafts/'+d.id,'PUT',d);$('#editor').close();notice('草稿已保存，未执行发布');await show(current)}));
-run(async()=>{await load();await poll()})();setInterval(run(poll),3000);
+run(async()=>{await load();await poll()})();
 
 document.addEventListener('error',e=>{if(e.target.tagName==='IMG'){e.target.hidden=true;const fallback=e.target.nextElementSibling;if(fallback)fallback.hidden=false}},true);
 
 let pickerCandidates=[], pickerChosen=new Set(), pickerSignature='', pickerTabs='';
 async function refreshPicker(){
- const state=await json('/selection/browser');$('#pickerStatus').textContent=state.message;
+ const state=await json('/selection/browser');pickerStatus=state.status;$('#pickerStatus').textContent=state.message;
  const ready=state.status==='ready';document.querySelectorAll('[data-picker]').forEach(b=>b.disabled=!ready);
  $('#openPicker').disabled=['ready','busy','starting'].includes(state.status);$('#closePicker').disabled=['closed','failed'].includes(state.status);
  const tabs=JSON.stringify(state.pages);if(tabs!==pickerTabs){const previous=$('#pickerPage').value;$('#pickerPage').innerHTML=state.pages.map(p=>`<option value="${escape(p.id)}">${escape(p.title||p.url)}</option>`).join('')||'<option value="">当前页</option>';if(state.pages.some(p=>p.id===previous))$('#pickerPage').value=previous;pickerTabs=tabs;}
@@ -55,9 +73,9 @@ async function refreshPicker(){
 }
 function updatePickCount(){$('#pickCount').textContent=`已选 ${pickerChosen.size} 项`;$('#pickAll').checked=pickerCandidates.length>0&&pickerChosen.size===pickerCandidates.length;}
 async function importSelection(urls,fromBrowser,collect){if(!urls.length)throw Error('请先选择商品或填写链接');const keyword=$('#pickerKeyword').value.trim();if(!keyword)throw Error('请填写保存分类');const r=await json(fromBrowser?'/selection/browser/import':'/selection/links','POST',{urls,keyword});r.ids.forEach(id=>selected.add(id));await load();if(collect){await json('/details/collect','POST',{ids:r.ids});notice(`已加入 ${r.ids.length} 件商品并开始采集详情；图片需另行下载`)}else notice(`已加入 ${r.ids.length} 件商品，请在商品列表中选择采集详情`);}
-$('#openPicker').onclick=run(async()=>{await json('/selection/browser/open','POST',{platform:$('#pickerPlatform').value});await refreshPicker()});
-$('#closePicker').onclick=run(async()=>{await json('/selection/browser/close','POST',{});await refreshPicker()});
-document.querySelectorAll('[data-picker]').forEach(b=>b.onclick=run(async()=>{await json('/selection/browser/command','POST',{action:b.dataset.picker,page:$('#pickerPage').value,url:$('#pickerUrl').value.trim(),rounds:+$('#pickerRounds').value,limit:+$('#pickerLimit').value});await refreshPicker()}));
+$('#openPicker').onclick=run(async()=>{await json('/selection/browser/open','POST',{platform:$('#pickerPlatform').value});await poll()});
+$('#closePicker').onclick=run(async()=>{await json('/selection/browser/close','POST',{});await poll()});
+document.querySelectorAll('[data-picker]').forEach(b=>b.onclick=run(async()=>{await json('/selection/browser/command','POST',{action:b.dataset.picker,page:$('#pickerPage').value,url:$('#pickerUrl').value.trim(),rounds:+$('#pickerRounds').value,limit:+$('#pickerLimit').value});await poll()}));
 $('#pickerCandidates').addEventListener('change',e=>{if(!e.target.matches('.candidate-check'))return;const url=pickerCandidates[+e.target.dataset.index].url;e.target.checked?pickerChosen.add(url):pickerChosen.delete(url);updatePickCount()});
 $('#pickAll').onchange=e=>{pickerChosen=new Set(e.target.checked?pickerCandidates.map(p=>p.url):[]);document.querySelectorAll('.candidate-check').forEach(c=>c.checked=e.target.checked);updatePickCount()};
 $('#importPicked').onclick=run(()=>importSelection([...pickerChosen],true,false));$('#collectPicked').onclick=run(()=>importSelection([...pickerChosen],true,true));
