@@ -83,7 +83,7 @@ def enrich(products: list[dict], progress: object = None, platform: str = 'xiany
     if platform=='taobao':
         from .taobao_details import collect as collector
     with sync_playwright() as p:
-        browser=p.chromium.launch(headless=False)
+        browser=p.chromium.launch(headless=True)
         try:
             context=browser.new_context(storage_state=str(ROOT/'state'/f'{platform}_state.json'),locale='zh-CN')
             for idx, product in enumerate(products):

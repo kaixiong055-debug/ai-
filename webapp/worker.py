@@ -25,30 +25,16 @@ def main() -> int:
     result = {'success':False,'products':[],'error':'采集进程失败，请检查浏览器安装和平台访问'}
     try:
         with crawler.sync_playwright() as p:
-            r = crawler.run_platform_batch(p,platform,[keyword],int(pages),headed=True)[keyword]
+            r = crawler.run_platform_batch(p,platform,[keyword],int(pages),headed=False)[keyword]
             result = {'success':r.success,'products':[asdict(x) for x in r.products],
                       'error':None if r.success else ERRORS.get(r.error_type,'采集失败，请检查浏览器安装、登录或网络限制')}
     except Exception:
         # Do not persist exception text: upstream errors can contain session-bearing URLs.
-        result['error'] = '浏览器启动或采集失败，请检查 Chromium 安装及可视桌面环境'
-    for product in result['products']:
-        product['detail_status']='pending' if platform in ('taobao','xianyu') else 'unsupported'
-    def save_progress(index: int | None = None, product: dict | None = None) -> None:
-        result['detail_completed']=index if index is not None else result.get('detail_completed',0)
-        result['detail_total']=len(result['products']) if platform in ('taobao','xianyu') else 0
-        temporary=Path(output).with_suffix('.tmp')
-        temporary.write_text(json.dumps(result,ensure_ascii=False),encoding='utf-8')
-        temporary.replace(output)
-    save_progress()
-    if platform in ('taobao','xianyu') and result['success'] and result['products']:
-        from .details import enrich
-        try:
-            enrich(result['products'],save_progress,platform=platform)
-        except Exception:
-            for product in result['products']:
-                if product.get('detail_status')=='pending':
-                    product.update(detail_status='failed',detail_error='详情任务中断，保留搜索主图；请重试详情采集')
-        save_progress()
+        result['error'] = '后台采集启动失败，请检查 Chromium 安装、登录状态和网络'
+    # Search only: details are an explicit, separate task. Do not reset existing details.
+    temporary = Path(output).with_suffix('.tmp')
+    temporary.write_text(json.dumps(result, ensure_ascii=False), encoding='utf-8')
+    temporary.replace(output)
 
     return 0
 

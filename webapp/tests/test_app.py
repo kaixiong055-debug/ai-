@@ -319,3 +319,27 @@ def test_export_missing_local_file_is_honest(client):
     z=zipfile.ZipFile(io.BytesIO(client.post('/api/export/zip',json={'ids':[pid]}).content))
     manifest=next(p for p in z.namelist() if p.endswith('图片清单.csv'))
     assert '本地文件缺失' in z.read(manifest).decode('utf-8-sig')
+
+def test_list_task_completes_without_details_and_preserves_previous_details(client,monkeypatch,tmp_path):
+    import sys,json
+    import webapp.tasks as tasks
+    (tmp_path/'state').mkdir()
+    (tmp_path/'state'/'xianyu_state.json').write_text('{}',encoding='utf-8')
+    monkeypatch.setattr(tasks,'ROOT',tmp_path)
+    store=client.app.state.store
+    pid=store.upsert({'platform':'xianyu','item_id':'old','title':'旧商品','description':'保留描述',
+                      'detail_status':'collected','gallery':['https://img.alicdn.com/a']},'k')
+    original=tasks.launch
+    payload={'success':True,'products':[{'platform':'xianyu','item_id':i,'title':'列表商品'} for i in ('old','new')]}
+    def worker(args):
+        return original([sys.executable,'-c','import pathlib,sys;pathlib.Path(sys.argv[1]).write_text(sys.argv[2],encoding="utf-8")',args[-1],json.dumps(payload)])
+    monkeypatch.setattr(tasks,'launch',worker)
+    client.post('/api/tasks',json={'keywords':['k'],'platforms':['xianyu'],'pages':1})
+    client.app.state.tasks.thread.join(5)
+    task=client.get('/api/tasks').json()[0]
+    assert task['status']=='completed' and task['failures']==[]
+    assert task['counts']=={'xianyu':2}
+    old=client.get(f'/api/products/{pid}').json()
+    assert old['detail_status']=='collected' and old['description']=='保留描述'
+    assert len(old['gallery'])==1
+    assert not (store.root/'images').exists()

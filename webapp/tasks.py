@@ -114,13 +114,6 @@ class TaskManager:
                         while self.proc.poll() is None:
                             if self.cancel.is_set() or time.monotonic()>deadline:
                                 terminate(self.proc); break
-                            if out.exists():
-                                try:
-                                    progress=json.loads(out.read_text(encoding='utf-8'))
-                                    if progress.get('detail_total'):
-                                        self.save(message=f"{platform} / {keyword}：详情图集已完成 {progress.get('detail_completed',0)}/{progress['detail_total']} 件")
-                                except (OSError,ValueError):
-                                    self.save(message='正在等待详情采集进度')
                             self.cancel.wait(.5)
                         if self.cancel.is_set():
                             if out.exists():
@@ -134,8 +127,6 @@ class TaskManager:
                             for product in result['products']:
                                 if self.cancel.is_set(): break
                                 self.store.upsert(product,keyword)
-                                if product.get('detail_status') in ('failed','pending') or product.get('detail_error'):
-                                    self.active['failures'].append({'item_id':product['item_id'],'error':product.get('detail_error') or '图集尚未采集完成，请补采详情'})
                             self.active['counts'][platform]=self.active['counts'].get(platform,0)+len(result['products'])
                             if not result['products']:
                                 self.active['failures'].append({'platform':platform,'keyword':keyword,'error':'返回零条商品，可能没有匹配结果或平台限制访问'})
