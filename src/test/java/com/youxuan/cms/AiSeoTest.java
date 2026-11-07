@@ -1,6 +1,9 @@
 package com.youxuan.cms;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+
+import java.net.http.HttpClient;
+
 import static org.assertj.core.api.Assertions.*;
 class AiSeoTest {
  final ObjectMapper json=new ObjectMapper();
@@ -16,5 +19,11 @@ class AiSeoTest {
   assertThat(AiSeoController.upstreamError(400)).contains("HTTP 400","参数");
   assertThat(AiSeoController.upstreamError(503)).contains("HTTP 503");
   assertThat(AiSeoController.upstreamError(401)).contains("application.yml");
+ }
+ @Test void usesHttp11ForDeepSeekGatewayCompatibility()throws Exception{
+  var controller=new AiSeoController(json,"configured-key");
+  var field=AiSeoController.class.getDeclaredField("client");
+  field.setAccessible(true);
+  assertThat(((HttpClient)field.get(controller)).version()).isEqualTo(HttpClient.Version.HTTP_1_1);
  }
 }

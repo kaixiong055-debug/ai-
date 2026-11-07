@@ -14,7 +14,7 @@ import java.util.*;
 public class AiSeoController {
  private static final org.slf4j.Logger log=org.slf4j.LoggerFactory.getLogger(AiSeoController.class);
  private final ObjectMapper json; private final String key; private final HttpClient client;
- public AiSeoController(ObjectMapper json,@Value("${deepseek.api-key:}") String key){this.json=json;this.key=key;this.client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
+ public AiSeoController(ObjectMapper json,@Value("${deepseek.api-key:}") String key){this.json=json;this.key=key;this.client=HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1).connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
  @PostMapping("/api/admin/ai/seo") public Map<String,Object> generate(@RequestBody Game game){
   if(key.isBlank())throw error(HttpStatus.SERVICE_UNAVAILABLE,"请在 application.yml 中配置 deepseek.api-key，然后重启服务");
   Map<String,Object> facts=new LinkedHashMap<>();facts.put("name",game.name);facts.put("summary",game.summary);facts.put("description",game.description);facts.put("category",game.category);facts.put("platform",game.platform);facts.put("version",game.version);facts.put("features",game.features);facts.put("benefits",game.benefits);
