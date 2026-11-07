@@ -1,80 +1,83 @@
-# ai- · 本地电商商品工作台
+# 游选 · Java 游戏站与管理后台
 
-可以使用 AI 自动抓取电商图片。本项目基于 [hairconker/Product-Crawling](https://github.com/hairconker/Product-Crawling) 开发，保留来源提交历史。
+保留已确认的游戏落地页效果，提供可登录管理的服务器版本。Java 17+，Spring Boot 3.5，Thymeleaf 输出完整 HTML，后台原生 JavaScript；无需 Node、Docker 或单独前端构建。
 
-## Windows 可视化启动
+## 已实现
 
-安装 Python 3.10+ 后，在项目根目录双击 **启动工具.bat**。首次自动安装依赖及 Chromium，随后启动本地服务并打开管理页面。
+- `/admin` 游戏管理：创建、编辑、删除、搜索、草稿、预览、发布和下线。
+- 服务器保存文字和 SEO；图片可上传或填写 HTTPS 地址，截图可排序、设替代文字。上传 JPG/PNG/GIF 会重编码去除附带内容；GIF取首帧。
+- 视频填写 HTTPS 直链（建议 MP4/H.264）；可配置多个视频标题和封面，播放器点击后才请求文件。不抓取视频站页面或自动下载视频。
+- 游戏玩法、福利、FAQ、推广下载地址、介绍页地址均可配置。
+- 每游戏唯一 `/games/{slug}/`，SSR正文、独立title/description/keywords、canonical、OG、结构化数据，自动SEO可覆盖。首次发布后锁定URL；正文仍可随时修改。
+- 动态 sitemap.xml / robots.txt：只包含已发布且允许索引的游戏；未配置正式域名默认noindex，后台、预览和草稿不参与索引。搜索结果页noindex。
+- JSON + ZIP导入草稿：支持3387 `result.data`列表（填写game_id）和已有规范化JSON；按“游戏icon/banner/游戏截图/简介/福利”文件名匹配。不会导入佣金、签名ZIP链接等后台资料；重复ID拒绝覆盖。ZIP视频不上传，JSON里有效视频URL可导入，否则在编辑器填写直链。
+- 管理端 session登录、CSRF、登录失败限制、内容转义、URL校验、上传限制、并发编辑冲突提示。
 
-支持淘宝/闲鱼采集、商品库、主图下载、CSV/ZIP 导出及待发布草稿。真实自动发布暂不支持；SKU 图和详情图待支持。
+## 本机运行
 
-完整使用说明和验证范围见 [webapp/README.md](webapp/README.md)。
-
----
-
-以下保留原项目说明。
-
-# Product-Crawling
-
-多平台电商/二手商品价格爬虫，按关键词同步搜索 **京东 / 闲鱼 / 淘宝** 三个平台并归一化输出。
-
-## 快速开始
+准备 Java 17+ 和 Maven 3.9+：
 
 ```bash
-# 1) 一次性准备
-pip install playwright
-python -m playwright install chromium
-
-# 2) 扫码登录（cookie 自动检测，不用按回车）
-python scripts/login_helper.py all
-
-# 3) 搜索某款 CPU
-python run_cpu_crawl_pw.py "i5-12400F" --pages 3 --headed
+# 在本项目根目录执行
+mvn clean verify
+export GAME_ADMIN_USERNAME=admin
+read -rsp '请输入管理员密码（至少12字符）: ' GAME_ADMIN_PASSWORD; echo
+export GAME_ADMIN_PASSWORD
+export CMS_DEMO_ENABLED=true  # 可选：首次创建小小驯龙师草稿及真实图片
+./start.sh
 ```
 
-- `--pages N`：每平台爬取页数
-- `--only <platform>`：只跑单平台（`jd` / `xianyu` / `taobao`）
-- `--headed`：显示浏览器（淘宝过滑块时必须）
+访问 `http://127.0.0.1:8080/admin`。后台输入上面设置的账号密码。示例处于草稿，先编辑、预览，再发布。默认站点无域名，因此保持noindex。公网正式部署完成后在“站点设置”填写真实HTTPS根域名，检查游戏页面后启用索引。
 
-结果打印在终端，完整 JSON 落 `logs/report_pw_*.json`，失败时 HTML + 全页截图落 `logs/debug/`。
+数据默认写入运行目录的 `data/cms.mv.db` 与 `data/uploads/`；应用更新不得覆盖 data。示例初始不配置视频，可直接输入自己的视频CDN链接。
 
-## 两套实现并存
+## Linux / 宝塔部署
 
-| 脚本 | 场景 |
-|---|---|
-| `run_cpu_crawl_pw.py` | **主力**：Playwright，处理 SPA，拦截 mtop 响应 / 抽 DOM |
-| `run_cpu_crawl.py` | 最小依赖（仅 requests + 标准库），无 pip 环境可跑，只对 JD 可用 |
+交付部署包已经包含 `game-cms.jar`，服务器只需 Java 17+ 运行时。源码构建产物为 `target/game-cms-1.0.0.jar`。
 
-## 平台策略
+1. 准备域名并解析到服务器；宝塔创建该域名站点，申请SSL证书，启用HTTPS。
+2. 将 `game-cms.jar`、deploy、start.sh 放到 `/www/wwwroot/game-cms/`。创建普通系统用户 `gamecms`（已有则复用），创建data目录并授权：
 
-- **京东**：从 HTML 骨架 + `api.m.jd.com` XHR 拦截商品 JSON
-- **闲鱼**：`page.on('response')` 监听 `mtop.taobao.idlemtopsearch.pc.search` 返回，解析结构化字段
-- **淘宝**：首页暖场建信任 → 直接 goto `s.taobao.com/search?q=...` → 等商品 DOM 就绪 → 抽 a 标签 + 父节点价格/标题/图
+```bash
+sudo useradd --system --no-create-home --shell /usr/sbin/nologin gamecms
+sudo mkdir -p /www/wwwroot/game-cms/data
+sudo chown -R gamecms:gamecms /www/wwwroot/game-cms
+sudo cp /www/wwwroot/game-cms/deploy/env.example /www/wwwroot/game-cms/.env
+sudo chmod 600 /www/wwwroot/game-cms/.env
+```
 
-拼多多 2026-04 已永久移除（移动端登录复杂、pc 端商品极少）。
+3. 编辑 `.env`：替换管理员密码，使用至少12字符，最多72字节；保留 `COOKIE_SECURE=true`（HTTPS必需）。使用宝塔终端或SSH修改，不把密码贴到Git。
+4. `deploy/game-cms.service` 中的Java路径须与服务器一致（`command -v java`）；复制为 `/etc/systemd/system/game-cms.service` 后执行：
 
-## 登录态 / 账号保活
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now game-cms
+sudo systemctl status game-cms
+```
 
-- 登录助手 `scripts/login_helper.py` 通过**轮询关键 cookie**（`thor/pin` / `unb/tracknick`）自动识别登录完成，无需回车确认
-- 每次爬取成功后自动把最新 cookies 回写 `state/{platform}_state.json`，延长登录态有效期
-- 启动时自动读账号信息并报告是否可用（昵称 / 用户名 / UID）
+5. 宝塔反向代理目标 `http://127.0.0.1:8080`，关闭缓存；`deploy/nginx-location.conf` 提供对应location参数和上传上限。**不要将项目/data/.env目录直接设为可浏览的网站目录**，所有请求转发给Java。安全组只开放80/443，8080绑定本机。
+6. 打开 `https://你的域名/admin`，登录→站点设置→填写名称和HTTPS根域名→新增/导入游戏→编辑视频/图片/文案/SEO→预览→发布→检查前台→启用搜索索引。
 
-## 反爬机制
+检查日志：`journalctl -u game-cms -n 100 --no-pager`。不在日志中输出管理员密码和JSON原始渠道数据。后台接口不对前台页面开放。
 
-- Stealth JS 注入（去 `navigator.webdriver`）
-- `--disable-blink-features=AutomationControlled` 启动参数
-- 节流常量：滚动 2.2s / 翻页 4.5s / 跨平台 6s
-- 淘宝滑块检测 → headed 模式最多等 5 分钟人工过
-- 风控识别：`rgv587_flag` / `deny_h5` / `risk_handler` 等命中后明确抛 `AntiSpiderError`
+## 数据库、备份与更新
 
-## 文档
+默认H2持久化数据库在服务器磁盘，适合单实例初期运营；不要多进程同时打开同一个H2文件。可用DB_URL/DB_USER/DB_PASSWORD指向PostgreSQL，应用自动建表；切换数据库不会自动搬迁旧数据，应先做单独数据迁移。
 
-- `CLAUDE.md` —— 项目架构概览（给 Claude Code 用）
-- `阶段任务/` —— 按阶段拆分的开发路线图
-- `登录流程.md` —— 扫码登录用户手册
-- `.claude/skills/` —— 项目级 skill 规范（编码 / 排错 / 新平台接入 / GitHub 复用）
-- `docs/vendored.md` —— 外部参考仓库清单（commit SHA 锁定）
+备份H2：先 `systemctl stop game-cms`，完整复制 `data/`（数据库和图片）及私密保存的`.env`，再启动。PostgreSQL使用pg_dump，并同步备份uploads。备份必须带访问权限，不能放公开下载目录。
 
-## 许可证
+更新：备份→停止服务→替换JAR→启动服务；保留data和.env。第一版不自动清理未引用图片，删除游戏不会误删其他游戏共享图片，备份时保留uploads。
 
-MIT
+首次登录失败限制按服务器观察到的连接地址计数，反代下可能共享额度：12次失败后15分钟解锁。单管理员第一版，账号和密码在服务环境配置中修改并重启生效。
+
+## SEO与微信使用
+
+页面无需JavaScript即可读取全部正文和下载链接；手机、电脑、微信公众号内置浏览器可以访问同一URL。微信可能限制APK下载，页面显示“在系统浏览器打开”提示。微信自定义分享卡片还需要公众号JS-SDK授权，这一版不伪造已授权分享。
+
+域名设置支持根域名，不支持部署在 `/foo` 子路径。`canonical`始终由配置的正式域名生成，避免被伪造Host头影响。site map不保证搜索引擎收录或排名；上线后将域名和sitemap提交对应搜索站长工具。
+
+后台图片外链需允许跨站显示，视频链接需支持浏览器播放及Range请求；此环境未实测用户的第三方CDN、微信真机或实际宝塔服务器。
+
+## 验证
+
+`mvn test` 运行认证、CRUD、数据验证、修订冲突、导入、图片安全和SEO测试。浏览器验收和当前版本验证结论见 `VERIFICATION.md`。
