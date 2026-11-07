@@ -1,0 +1,3 @@
+# 将此文件放在 game-cms.jar 同目录，填写密钥后重启服务。
+deepseek:
+  api-key: ""

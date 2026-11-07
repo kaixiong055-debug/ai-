@@ -13,9 +13,9 @@ import java.util.*;
 @RestController
 public class AiSeoController {
  private final ObjectMapper json; private final String key; private final HttpClient client;
- public AiSeoController(ObjectMapper json,@Value("${DEEPSEEK_API_KEY:}") String key){this.json=json;this.key=key;this.client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
+ public AiSeoController(ObjectMapper json,@Value("${deepseek.api-key:}") String key){this.json=json;this.key=key;this.client=HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).followRedirects(HttpClient.Redirect.NEVER).build();}
  @PostMapping("/api/admin/ai/seo") public Map<String,Object> generate(@RequestBody Game game){
-  if(key.isBlank())throw error(HttpStatus.SERVICE_UNAVAILABLE,"服务器尚未配置 DEEPSEEK_API_KEY，请配置后重启服务");
+  if(key.isBlank())throw error(HttpStatus.SERVICE_UNAVAILABLE,"请在 application.yml 中配置 deepseek.api-key，然后重启服务");
   Map<String,Object> facts=new LinkedHashMap<>();facts.put("name",game.name);facts.put("summary",game.summary);facts.put("description",game.description);facts.put("category",game.category);facts.put("platform",game.platform);facts.put("version",game.version);facts.put("features",game.features);facts.put("benefits",game.benefits);
   if(game.name==null||game.name.isBlank()||game.description==null||game.description.isBlank())throw error(HttpStatus.BAD_REQUEST,"请先填写游戏名称和游戏介绍");
   try{

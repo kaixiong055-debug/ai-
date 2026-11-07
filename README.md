@@ -84,6 +84,13 @@ sudo systemctl status game-cms
 
 ## DeepSeek 自动生成 SEO 与常见问题
 
-在服务器 `.env` 配置 `DEEPSEEK_API_KEY=你的密钥` 后重启服务。打开后台→编辑游戏→独立 SEO→「AI 生成 SEO 和常见问题」。先填写游戏名称、介绍和实际福利；生成会替换编辑框中的SEO标题、描述、关键词及FAQ，检查后点击保存才会更新数据库/公开页面。
+在 `application.yml` 直接配置密钥：
+
+```yaml
+deepseek:
+  api-key: "你的DeepSeek密钥"
+```
+
+源码配置文件为 `src/main/resources/application.yml`。已部署 JAR 时，将 `deploy/application.yml` 复制到 `game-cms.jar` 同目录，填写密钥并重启服务即可，无需重新打包。打开后台→编辑游戏→独立 SEO→「AI 生成 SEO 和常见问题」。先填写游戏名称、介绍和实际福利；生成会替换编辑框中的SEO标题、描述、关键词及FAQ，检查后点击保存才会更新数据库/公开页面。
 
 Java后端调用官方 `https://api.deepseek.com/chat/completions`，模型 `deepseek-chat`，60秒超时，不自动重试；按你的DeepSeek账户计费。只发送游戏文字资料，不发送管理员密码、图片文件或推广链接。Key不发给浏览器、不写普通日志。服务器需能通过HTTPS访问 api.deepseek.com。未配置密钥、额度不足、限流、超时会显示中文错误，保留原内容。AI可能出错，请检查事实与活动条件。

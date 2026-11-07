@@ -36,3 +36,7 @@ cms:
     password: ${GAME_ADMIN_PASSWORD:}
   demo:
     enabled: ${CMS_DEMO_ENABLED:false}
+
+# 在此填写 DeepSeek 密钥；修改后重启服务。
+deepseek:
+  api-key: ""

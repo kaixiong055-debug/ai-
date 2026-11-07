@@ -11,5 +11,5 @@ class AiSeoTest {
  @Test void rejectsInvalidOrIncompleteResults(){
   for(String input:new String[]{"{}","null","{\"faqs\":[]}","not json"})assertThatThrownBy(()->AiSeoController.parse(json,input)).isInstanceOf(Exception.class);
  }
- @Test void missingKeyFailsClearlyWithoutNetwork(){assertThatThrownBy(()->new AiSeoController(json,"").generate(new Game())).hasMessageContaining("DEEPSEEK_API_KEY");}
+ @Test void missingKeyFailsClearlyWithoutNetwork(){assertThatThrownBy(()->new AiSeoController(json,"").generate(new Game())).hasMessageContaining("deepseek.api-key");}
 }
