@@ -12,4 +12,9 @@ class AiSeoTest {
   for(String input:new String[]{"{}","null","{\"faqs\":[]}","not json"})assertThatThrownBy(()->AiSeoController.parse(json,input)).isInstanceOf(Exception.class);
  }
  @Test void missingKeyFailsClearlyWithoutNetwork(){assertThatThrownBy(()->new AiSeoController(json,"").generate(new Game())).hasMessageContaining("deepseek.api-key");}
+ @Test void exposesActualUpstreamStatusInsteadOfGeneric502(){
+  assertThat(AiSeoController.upstreamError(400)).contains("HTTP 400","参数");
+  assertThat(AiSeoController.upstreamError(503)).contains("HTTP 503");
+  assertThat(AiSeoController.upstreamError(401)).contains("application.yml");
+ }
 }
