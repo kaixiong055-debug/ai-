@@ -94,3 +94,7 @@ deepseek:
 源码配置文件为 `src/main/resources/application.yml`。已部署 JAR 时，将 `deploy/application.yml` 复制到 `game-cms.jar` 同目录，填写密钥并重启服务即可，无需重新打包。打开后台→编辑游戏→独立 SEO→「AI 生成 SEO 和常见问题」。先填写游戏名称、介绍和实际福利；生成会替换编辑框中的SEO标题、描述、关键词及FAQ，检查后点击保存才会更新数据库/公开页面。
 
 Java后端调用官方 `https://api.deepseek.com/chat/completions`，模型 `deepseek-chat`，60秒超时，不自动重试；按你的DeepSeek账户计费。只发送游戏文字资料，不发送管理员密码、图片文件或推广链接。Key不发给浏览器、不写普通日志。服务器需能通过HTTPS访问 api.deepseek.com。未配置密钥、额度不足、限流、超时会显示中文错误，保留原内容。AI可能出错，请检查事实与活动条件。
+
+## 登录会话更新
+
+默认会话 Cookie 改为 `GAME_CMS_SESSION`，避免与其他使用通用 JSESSIONID 的应用混淆。若外部 application.yml 已配置 `server.servlet.session.cookie.name`，请同步改成 `GAME_CMS_SESSION`。登录表单失效会返回登录页并显示重新登录提示，重新生成校验值；管理API仍保留CSRF校验。更新JAR并重启后重新打开登录页；保留原有数据库、密钥和端口配置。此改动处理会话隔离与失效恢复，不代表已经确认线上失败的全部原因。

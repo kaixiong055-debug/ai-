@@ -38,15 +38,15 @@ public class SecurityConfig {
   if(username.isBlank()||username.length()>100)throw new IllegalStateException("GAME_ADMIN_USERNAME 必须为 1 至 100 个字符");
   return new InMemoryUserDetailsManager(User.withUsername(username).password(encoder.encode(password)).roles("ADMIN").build());
  }
- @Bean SecurityFilterChain security(HttpSecurity http)throws Exception{
+ @Bean SecurityFilterChain security(HttpSecurity http,@Value("${server.servlet.session.cookie.name:GAME_CMS_SESSION}") String sessionCookieName)throws Exception{
   http.authorizeHttpRequests(a->a.requestMatchers(HttpMethod.GET,PUBLIC_READ_PATHS).permitAll().requestMatchers(HttpMethod.HEAD,PUBLIC_READ_PATHS).permitAll().requestMatchers("/login").permitAll().anyRequest().authenticated());
   http.formLogin(f->f.loginPage("/login").successHandler((request,response,auth)->{throttle.reset(request.getRemoteAddr());response.sendRedirect(request.getContextPath()+"/admin");}).failureHandler((request,response,error)->{throttle.failed(request.getRemoteAddr());response.sendRedirect(request.getContextPath()+"/login?error");}));
-  http.logout(l->l.logoutSuccessUrl("/login?logout").invalidateHttpSession(true).deleteCookies("JSESSIONID"));
+  http.logout(l->l.logoutSuccessUrl("/login?logout").invalidateHttpSession(true).deleteCookies(sessionCookieName));
   LinkedHashMap<RequestMatcher,AuthenticationEntryPoint> entries=new LinkedHashMap<>();
   entries.put(new AntPathRequestMatcher("/api/**"),(request,response,error)->{response.setStatus(401);response.setContentType("application/json;charset=UTF-8");response.getWriter().write("{\"message\":\"登录已过期，请重新登录\"}");});
   DelegatingAuthenticationEntryPoint entryPoint=new DelegatingAuthenticationEntryPoint(entries);
   entryPoint.setDefaultEntryPoint(new LoginUrlAuthenticationEntryPoint("/login"));
-  http.exceptionHandling(e->e.authenticationEntryPoint(entryPoint).accessDeniedHandler((request,response,error)->{response.setStatus(403);response.setContentType("application/json;charset=UTF-8");response.getWriter().write("{\"message\":\"请求校验失败，请刷新页面后重试\"}");}));
+  http.exceptionHandling(e->e.authenticationEntryPoint(entryPoint).accessDeniedHandler((request,response,error)->{if(request.getServletPath().equals("/login") || request.getRequestURI().equals(request.getContextPath()+"/login")){if(error instanceof org.springframework.security.web.csrf.CsrfException){response.setStatus(303);response.setHeader("Location",request.getContextPath()+"/login?expired");response.setHeader("Cache-Control","no-store");return;}}response.setStatus(403);response.setContentType("application/json;charset=UTF-8");response.getWriter().write("{\"message\":\"请求校验失败，请刷新页面后重试\"}");}));
   http.headers(h->h.contentSecurityPolicy(c->c.policyDirectives("default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; media-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'")));
   http.addFilterBefore(new OncePerRequestFilter(){@Override protected void doFilterInternal(HttpServletRequest request,HttpServletResponse response,FilterChain chain)throws ServletException,IOException{
    String uri=request.getRequestURI();if(uri.startsWith("/admin")||uri.startsWith("/api/admin")||uri.equals("/login")){response.setHeader("X-Robots-Tag","noindex, nofollow");response.setHeader("Cache-Control","no-store");}

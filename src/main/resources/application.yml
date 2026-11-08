@@ -6,6 +6,8 @@ server:
     session:
       timeout: 2h
       cookie:
+        name: GAME_CMS_SESSION
+        path: /
         http-only: true
         secure: ${COOKIE_SECURE:false}
         same-site: lax
