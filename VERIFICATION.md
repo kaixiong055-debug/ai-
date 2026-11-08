@@ -90,3 +90,10 @@ DeepSeek服务器诊断更新：保留上游HTTP状态码，日志仅记录状�
 - 51 Java tests passed. Real Chromium checks passed at 390px and 1440px: recommendations, category filters, pagination, sitemap, mobile overflow and reduced motion.
 - Final mobile filter layout corrected and browser suite rerun successfully.
 - See design-qa.md for visual comparison and intentional production adaptations.
+
+## Explicit MVC parameter binding fix
+- Uploaded log: Spring MVC cannot resolve unnamed String argument without compiler parameter metadata.
+- Added explicit query/path names to public, admin and media controller bindings; Maven compiler metadata is enabled explicitly.
+- Regression test initially failed on PublicController.home before the fix.
+- Clean build with maven.compiler.parameters=false: 52 tests passed; javap confirmed PublicController has no MethodParameters metadata.
+- Normal production clean package also validated before delivery. No database or URL changes.

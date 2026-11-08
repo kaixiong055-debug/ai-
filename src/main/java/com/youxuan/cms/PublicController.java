@@ -25,7 +25,7 @@ public class PublicController {
     }
 
     @GetMapping("/")
-    public String home(@RequestParam(defaultValue = "") String q,@RequestParam(defaultValue="")String category,@RequestParam(defaultValue="recommended")String sort,@RequestParam(defaultValue="1")int page, Model model) {
+    public String home(@RequestParam(name="q",defaultValue="") String q,@RequestParam(name="category",defaultValue="")String category,@RequestParam(name="sort",defaultValue="recommended")String sort,@RequestParam(name="page",defaultValue="1")int page, Model model) {
         q = q.trim(); if (q.length() > 120) q = q.substring(0, 120);
         SiteSettings settings = games.settings();
         model.addAttribute("settings", settings);
@@ -42,20 +42,20 @@ public class PublicController {
     }
 
     @GetMapping("/games/{slug}")
-    public ResponseEntity<Void> trailingSlash(@PathVariable String slug) {
+    public ResponseEntity<Void> trailingSlash(@PathVariable("slug") String slug) {
         Game game = games.publishedBySlug(slug).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
         return ResponseEntity.status(HttpStatus.MOVED_PERMANENTLY).location(URI.create("/games/" + game.slug + "/")).build();
     }
 
     @GetMapping("/games/{slug}/")
-    public String game(@PathVariable String slug, Model model, HttpServletResponse response) {
+    public String game(@PathVariable("slug") String slug, Model model, HttpServletResponse response) {
         var found = games.publishedBySlug(slug);
         if (found.isEmpty()) { response.setStatus(404); return missing(model, response); }
         return render(found.get(), false, model, response);
     }
 
     @GetMapping("/admin/preview/{id}")
-    public String preview(@PathVariable String id, Model model, HttpServletResponse response) {
+    public String preview(@PathVariable("id") String id, Model model, HttpServletResponse response) {
         var found = games.find(id);
         if (found.isEmpty()) { response.setStatus(404); return missing(model, response); }
         response.setHeader("Cache-Control", "no-store");

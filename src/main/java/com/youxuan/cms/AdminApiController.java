@@ -15,13 +15,13 @@ public class AdminApiController {
  private final GameService games;private final CatalogService catalog;
  public AdminApiController(GameService games,CatalogService catalog){this.games=games;this.catalog=catalog;}
  @GetMapping("/session") public Map<String,String> session(HttpServletRequest request,Authentication auth){CsrfToken csrf=(CsrfToken)request.getAttribute(CsrfToken.class.getName());return Map.of("username",auth.getName(),"token",csrf.getToken(),"headerName",csrf.getHeaderName());}
- @GetMapping("/games")public List<Game> list(@RequestParam(defaultValue="")String q,@RequestParam(defaultValue="")String status){return games.list(q,status);}
- @GetMapping("/games/page") public CatalogService.Page page(@RequestParam(defaultValue="")String q,@RequestParam(defaultValue="")String status,@RequestParam(defaultValue="")String category,@RequestParam(defaultValue="latest")String sort,@RequestParam(defaultValue="1")int page,@RequestParam(defaultValue="20")int size){return catalog.page(q,status,category,sort,page,size);}
+ @GetMapping("/games")public List<Game> list(@RequestParam(name="q",defaultValue="")String q,@RequestParam(name="status",defaultValue="")String status){return games.list(q,status);}
+ @GetMapping("/games/page") public CatalogService.Page page(@RequestParam(name="q",defaultValue="")String q,@RequestParam(name="status",defaultValue="")String status,@RequestParam(name="category",defaultValue="")String category,@RequestParam(name="sort",defaultValue="latest")String sort,@RequestParam(name="page",defaultValue="1")int page,@RequestParam(name="size",defaultValue="20")int size){return catalog.page(q,status,category,sort,page,size);}
  @GetMapping("/categories") public List<String> categories(){return catalog.categories(false);}
- @GetMapping("/games/{id}")public Game get(@PathVariable String id){return games.find(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"游戏不存在"));}
+ @GetMapping("/games/{id}")public Game get(@PathVariable("id") String id){return games.find(id).orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND,"游戏不存在"));}
  @PostMapping("/games")@ResponseStatus(HttpStatus.CREATED)public Game create(@RequestBody Game game){if(game.id!=null&&!game.id.isBlank()&&games.find(game.id).isPresent())throw new ResponseStatusException(HttpStatus.CONFLICT,"游戏ID已存在");if(game.revision!=0)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"新游戏 revision 必须为 0");return games.save(game);}
- @PutMapping("/games/{id}")public Game update(@PathVariable String id,@RequestBody Game game){get(id);if(game.id!=null&&!game.id.isBlank()&&!id.equals(game.id))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"不能修改游戏ID");game.id=id;return games.save(game);}
- @DeleteMapping("/games/{id}")@ResponseStatus(HttpStatus.NO_CONTENT)public void delete(@PathVariable String id,@RequestParam long revision){games.delete(id,revision);}
+ @PutMapping("/games/{id}")public Game update(@PathVariable("id") String id,@RequestBody Game game){get(id);if(game.id!=null&&!game.id.isBlank()&&!id.equals(game.id))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"不能修改游戏ID");game.id=id;return games.save(game);}
+ @DeleteMapping("/games/{id}")@ResponseStatus(HttpStatus.NO_CONTENT)public void delete(@PathVariable("id") String id,@RequestParam("revision") long revision){games.delete(id,revision);}
  @GetMapping("/settings")public SiteSettings settings(){return games.settings();}
  @PutMapping("/settings")public SiteSettings settings(@RequestBody SiteSettings settings){return games.saveSettings(settings);}
 }
