@@ -42,6 +42,7 @@ public class GameService {
    if(fresh)db.update("INSERT INTO cms_games(id,slug,payload,published,slug_locked,revision,updated_at) VALUES(?,?,?,?,?,?,?)",g.id,g.slug,write(g),g.published,g.published,g.revision,now);
    else if(db.update("UPDATE cms_games SET slug=?,payload=?,published=?,slug_locked=?,revision=?,updated_at=? WHERE id=? AND revision=?",g.slug,write(g),g.published,locked||g.published,g.revision,now,g.id,oldRevision)!=1)throw conflict("内容已被更新，请重新加载后保存");
   }catch(DuplicateKeyException e){throw conflict("游戏ID或页面URL已存在，请使用其他标识");}
+  CatalogService.index(db,g);
   return g;
  }
  @Transactional

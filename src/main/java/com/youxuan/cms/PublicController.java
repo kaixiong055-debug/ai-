@@ -16,7 +16,8 @@ import java.util.List;
 public class PublicController {
     private final GameService games;
     private final SeoService seo;
-    public PublicController(GameService games, SeoService seo) { this.games = games; this.seo = seo; }
+    private final CatalogService catalog;
+    public PublicController(GameService games, SeoService seo,CatalogService catalog) { this.games = games; this.seo = seo;this.catalog=catalog; }
 
     @GetMapping("/favicon.ico")
     public ResponseEntity<Void> favicon() {
@@ -24,12 +25,17 @@ public class PublicController {
     }
 
     @GetMapping("/")
-    public String home(@RequestParam(defaultValue = "") String q, Model model) {
+    public String home(@RequestParam(defaultValue = "") String q,@RequestParam(defaultValue="")String category,@RequestParam(defaultValue="latest")String sort,@RequestParam(defaultValue="1")int page, Model model) {
         q = q.trim(); if (q.length() > 120) q = q.substring(0, 120);
         SiteSettings settings = games.settings();
         model.addAttribute("settings", settings);
-        model.addAttribute("seo", seo.home(settings, !q.isBlank()));
-        model.addAttribute("games", games.list(q, "published").stream().filter(g -> g.published).toList());
+        var result=catalog.page(q,"published",category,sort,page,18);
+        var metadata=new java.util.HashMap<>(seo.home(settings, !q.isBlank()||!category.isBlank()||!sort.equals("latest")));
+        if(result.page()>1){metadata.put("title",metadata.get("title")+" · 第"+result.page()+"页");if(!metadata.get("canonical").isBlank())metadata.put("canonical",metadata.get("canonical")+"?page="+result.page());}
+        model.addAttribute("seo",metadata);
+        model.addAttribute("games",result.items());model.addAttribute("pager",result);
+        model.addAttribute("category",category);model.addAttribute("sort",sort);model.addAttribute("categories",catalog.categories(true));
+        model.addAttribute("pageNumbers",java.util.stream.IntStream.rangeClosed(Math.max(1,result.page()-2),Math.min(result.pages(),result.page()+2)).boxed().toList());
         model.addAttribute("q", q);
         return "site-home";
     }
@@ -87,8 +93,7 @@ public class PublicController {
         if (seo.indexable(settings)) {
             String base = seo.origin(settings);
             appendUrl(xml, base + "/", "");
-            for (Game g : games.list("", "published"))
-                if (g.published && !g.noindex) appendUrl(xml, base + "/games/" + g.slug + "/", g.updatedAt);
+            for (var row : catalog.sitemap()) appendUrl(xml, base + "/games/" + row.get("slug") + "/", String.valueOf(row.get("updated_at")));
         }
         return xml.append("</urlset>\n").toString();
     }
