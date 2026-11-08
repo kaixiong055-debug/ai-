@@ -13,7 +13,7 @@ import java.util.zip.*;
 public class ImportService {
  private final GameService games;private final MediaService media;private final ObjectMapper mapper;
  public ImportService(GameService games,MediaService media,ObjectMapper mapper){this.games=games;this.media=media;this.mapper=mapper;}
- public Game importGame(byte[] json,InputStream archive,String gameId){
+ public synchronized Game importGame(byte[] json,InputStream archive,String gameId){
   if(json.length>2*1024*1024)throw bad("JSON 文件不能超过 2MB");
   try{
    JsonNode source=select(mapper.readTree(json),gameId);

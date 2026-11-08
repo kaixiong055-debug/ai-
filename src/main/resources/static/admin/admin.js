@@ -149,7 +149,39 @@
   }
   function renderImport(){
     content.innerHTML=`<div class="intro-row"><div><h2>把素材变成游戏页面</h2><p>上传游戏资料和素材包，自动建立可以继续编辑的草稿。</p></div></div><div class="import-layout"><section class="panel"><div class="panel-heading"><div><h2>JSON + ZIP 导入</h2><p>原有平台游戏列表 JSON 与对应游戏素材包。</p></div></div><div class="panel-body"><form id="import-form" class="stack"><label class="field">1 · 游戏资料 JSON<input id="import-json" type="file" name="json" accept=".json,.txt,application/json,text/plain" required><small>支持平台 result.data 格式和已整理的单游戏资料。</small></label><label class="field">2 · 选择对应游戏<select name="gameId" id="import-game-id" aria-label="对应游戏"><option value="">先选择 JSON 文件</option></select><small>JSON 内包含多款游戏时，请选中与素材包对应的一款。</small></label><label class="field">3 · 游戏素材 ZIP<input type="file" name="zip" accept=".zip,application/zip" required><small>按素材包目录识别图标、横幅、截图和介绍文字。</small></label><div class="form-note">图片会保存到服务器。ZIP 内视频不导入，请在游戏编辑页填写视频直链。导入先保存为草稿，预览满意后再发布。</div><button type="submit" class="button primary">导入并创建草稿 →</button><div id="import-status" class="import-status" role="status" hidden></div></form></div></section><section class="panel import-steps"><span class="eyebrow">HOW IT WORKS</span><div class="import-step"><span class="step-number">1</span><div><h3>提供真实资料</h3><p>名称、介绍与推广链接来自 JSON，图片和说明来自素材包。</p></div></div><div class="import-step"><span class="step-number">2</span><div><h3>检查草稿</h3><p>调整文案和图片顺序，补充视频链接，按需自定义 SEO。</p></div></div><div class="import-step"><span class="step-number">3</span><div><h3>发布独立页面</h3><p>每个游戏一个页面地址，发布后进入首页与站点地图。</p></div></div></section></div>`;
+    renderBatchImport();
   }
+  let batchFiles=[],batchJson=null,batchRows=[],batchStopped=false;
+  function renderBatchImport(){
+    batchFiles=[];batchJson=null;batchRows=[];
+    const section=document.createElement('section');section.className='panel batch-panel';section.innerHTML=`<div class="panel-heading"><div><h2>文件夹批量导入</h2><p>选择一个 JSON 和整个素材文件夹，自动匹配尚未入库的游戏。</p></div></div><div class="panel-body stack"><label class="field">1 · 游戏列表 JSON<input type="file" id="batch-json" accept=".json,.txt,application/json"></label><label class="field">2 · 选择素材文件夹（包括子文件夹）<input type="file" id="batch-folder" webkitdirectory multiple></label><label class="field">或多选 ZIP 文件<input type="file" id="batch-zips" accept=".zip" multiple></label><p class="help">支持「游戏名称.zip」「《游戏名称》游戏素材.zip」或「游戏ID.zip」。不明确的匹配会提示；已存在的游戏不会上传素材或覆盖内容。每个 ZIP 上限 64MB，每批最多 2000 个。新游戏保存为草稿。</p><div class="row-actions"><button type="button" class="button" id="batch-plan">检查并匹配</button><button type="button" class="button primary" id="batch-start" disabled>开始批量导入</button><button type="button" class="button" id="batch-stop" disabled>停止后续导入</button></div><p id="batch-summary" role="status">请选择资料文件。</p><div id="batch-results" class="batch-results"></div></div>`;
+    content.prepend(section);
+    const invalidate=()=>{batchRows=[];$('#batch-start').disabled=true;$('#batch-results').textContent='';$('#batch-summary').textContent=`已选择 ${batchFiles.length} 个 ZIP，请检查并匹配。`;setDirty(true);};
+    $('#batch-json').onchange=e=>{batchJson=e.target.files[0];invalidate();};
+    for(const id of ['batch-folder','batch-zips'])$('#'+id).onchange=e=>{batchFiles=Array.from(e.target.files).filter(f=>/\.zip$/i.test(f.name));$('#'+(id==='batch-folder'?'batch-zips':'batch-folder')).value='';invalidate();};
+    $('#batch-plan').onclick=planBatch;$('#batch-start').onclick=runBatch;$('#batch-stop').onclick=()=>{batchStopped=true;$('#batch-stop').disabled=true;$('#batch-summary').textContent='当前文件完成后停止，已成功导入的游戏会保留。';};
+  }
+  function showBatch(){
+    const labels={ready:'待导入',running:'导入中',success:'成功',skipped:'跳过',error:'失败 / 未匹配',unused:'未使用'};
+    $('#batch-results').innerHTML=batchRows.map(r=>`<div class="batch-row"><strong>${esc(r.name)} ${r.gameId?'· '+esc(r.gameId):''}</strong><span>${labels[r.status]||r.status} · ${esc(r.message)}</span></div>`).join('');
+    $('#batch-summary').textContent=['success','skipped','error','ready'].map(s=>`${labels[s]} ${batchRows.filter(r=>r.status===s).length}`).join(' · ');
+  }
+  async function planBatch(){
+    if(state.busy)return;
+    if(!batchJson||!batchFiles.length){notify('请选择 JSON 和包含 ZIP 的素材文件夹。','error');return;}
+    if(batchJson.size>2*1024*1024||batchFiles.length>2000){notify('JSON 上限 2MB，每批最多 2000 个 ZIP。','error');return;}
+    state.busy=true;const unlock=lockForm($('.batch-panel'));$('#batch-start').disabled=true;
+    try{const form=new FormData();form.append('json',batchJson);form.append('filenames',JSON.stringify(batchFiles.map(f=>f.webkitRelativePath||f.name)));batchRows=await api('/api/admin/import/plan',{method:'POST',body:form});for(const row of batchRows)if(row.status==='ready'&&batchFiles[row.fileIndex].size>64*1024*1024){row.status='error';row.message='ZIP 超过 64MB';}showBatch();}catch(e){batchRows=[];report(e);}finally{state.busy=false;unlock();$('#batch-start').disabled=!batchRows.some(r=>r.status==='ready');}
+  }
+  async function runBatch(){
+    if(state.busy)return;state.busy=true;batchStopped=false;const unlock=lockForm($('.batch-panel'));$('#batch-stop').disabled=false;
+    try{for(const row of batchRows){if(batchStopped)break;if(row.status!=='ready')continue;row.status='running';row.message='正在上传和整理素材';showBatch();
+      try{const form=new FormData();form.append('json',batchJson);form.append('zip',batchFiles[row.fileIndex]);form.append('gameId',row.gameId);await api('/api/admin/import',{method:'POST',body:form});row.status='success';row.message='已创建草稿';}
+      catch(e){try{await api('/api/admin/games/'+encodeURIComponent(row.gameId));row.status='skipped';row.message='已入库，本次未覆盖；可在游戏管理中查看';}catch{row.status='error';row.message=e.message;}if(e.expired)batchStopped=true;}
+      showBatch();
+    }}finally{state.busy=false;state.dirty=false;unlock();$('#batch-stop').disabled=true;$('#batch-start').disabled=!batchRows.some(r=>r.status==='ready');showBatch();notify(batchStopped?'已停止，已导入的游戏已保存。':'批量处理完成，请查看逐项结果。');}
+  }
+
   async function parseImportJson(input){
     const select=$('#import-game-id');select.innerHTML='<option value="">正在读取…</option>';
     try{
