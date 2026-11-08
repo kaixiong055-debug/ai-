@@ -84,3 +84,9 @@ DeepSeek服务器诊断更新：保留上游HTTP状态码，日志仅记录状�
 
 - 去掉空标签区占位，展示实际图标、分类、平台、简介（无摘要时使用介绍节选）、已有玩法亮点、福利详情入口和版本信息；无资料的模块不显示。
 - Maven package 51 项回归测试通过；真实 Chromium 复查桌面/390px 手机、分页与筛选、减少动态效果，无横向溢出和 JavaScript 异常；已查看截图。
+
+## Stitch homepage redesign (separate branch)
+- Reference: uploaded Stitch 390px_1 homepage; details/admin templates unchanged.
+- 51 Java tests passed. Real Chromium checks passed at 390px and 1440px: recommendations, category filters, pagination, sitemap, mobile overflow and reduced motion.
+- Final mobile filter layout corrected and browser suite rerun successfully.
+- See design-qa.md for visual comparison and intentional production adaptations.
