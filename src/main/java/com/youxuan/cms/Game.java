@@ -7,6 +7,7 @@ import java.util.List;
 public class Game {
  public String id="", slug="", name="", subtitle="", summary="", description="", category="", platform="Android", version="";
  public String iconUrl="", heroUrl="", downloadUrl="", introUrl="", seoTitle="", seoDescription="", seoKeywords="", ogImage="";
+ public int recommendationRank=0;
  public boolean noindex=false, published=false;
  public List<String> tags=new ArrayList<>();
  public List<Picture> screenshots=new ArrayList<>();

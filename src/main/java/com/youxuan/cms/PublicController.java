@@ -25,18 +25,19 @@ public class PublicController {
     }
 
     @GetMapping("/")
-    public String home(@RequestParam(defaultValue = "") String q,@RequestParam(defaultValue="")String category,@RequestParam(defaultValue="latest")String sort,@RequestParam(defaultValue="1")int page, Model model) {
+    public String home(@RequestParam(defaultValue = "") String q,@RequestParam(defaultValue="")String category,@RequestParam(defaultValue="recommended")String sort,@RequestParam(defaultValue="1")int page, Model model) {
         q = q.trim(); if (q.length() > 120) q = q.substring(0, 120);
         SiteSettings settings = games.settings();
         model.addAttribute("settings", settings);
         var result=catalog.page(q,"published",category,sort,page,18);
-        var metadata=new java.util.HashMap<>(seo.home(settings, !q.isBlank()||!category.isBlank()||!sort.equals("latest")));
+        var metadata=new java.util.HashMap<>(seo.home(settings, !q.isBlank()||!category.isBlank()||!sort.equals("recommended")));
         if(result.page()>1){metadata.put("title",metadata.get("title")+" · 第"+result.page()+"页");if(!metadata.get("canonical").isBlank())metadata.put("canonical",metadata.get("canonical")+"?page="+result.page());}
         model.addAttribute("seo",metadata);
         model.addAttribute("games",result.items());model.addAttribute("pager",result);
         model.addAttribute("category",category);model.addAttribute("sort",sort);model.addAttribute("categories",catalog.categories(true));
         model.addAttribute("pageNumbers",java.util.stream.IntStream.rangeClosed(Math.max(1,result.page()-2),Math.min(result.pages(),result.page()+2)).boxed().toList());
         model.addAttribute("q", q);
+        model.addAttribute("featured",q.isBlank()&&category.isBlank()&&result.page()==1&&sort.equals("recommended")?catalog.featured():null);
         return "site-home";
     }
 
@@ -87,9 +88,10 @@ public class PublicController {
 
     @GetMapping(value = "/sitemap.xml", produces = "application/xml;charset=UTF-8")
     @ResponseBody
-    public String sitemap() {
+    public String sitemap(HttpServletResponse response) {
+        response.setHeader("Cache-Control", "no-store");
         SiteSettings settings = games.settings();
-        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
+        StringBuilder xml = new StringBuilder("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<?xml-stylesheet type=\"text/xsl\" href=\"/site/sitemap.xsl\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n");
         if (seo.indexable(settings)) {
             String base = seo.origin(settings);
             appendUrl(xml, base + "/", "");
@@ -99,11 +101,11 @@ public class PublicController {
     }
 
     private static void appendUrl(StringBuilder out, String url, String updated) {
-        out.append("<url><loc>").append(HtmlUtils.htmlEscape(url)).append("</loc>");
+        out.append("  <url>\n    <loc>").append(HtmlUtils.htmlEscape(url)).append("</loc>\n");
         if (updated != null && !updated.isBlank()) {
-            try { out.append("<lastmod>").append(Instant.parse(updated)).append("</lastmod>"); }
+            try { out.append("    <lastmod>").append(Instant.parse(updated).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)).append("</lastmod>\n"); }
             catch (RuntimeException ignored) { /* Old imports may not have an ISO timestamp. */ }
         }
-        out.append("</url>\n");
+        out.append("  </url>\n");
     }
 }

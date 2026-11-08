@@ -35,6 +35,7 @@ public class GameService {
   boolean locked=!fresh&&Boolean.TRUE.equals(db.queryForObject("SELECT slug_locked FROM cms_games WHERE id=?",Boolean.class,g.id));
   if(locked&&!g.slug.equals(previous.get().slug))throw conflict("首次发布后 URL 已锁定，避免搜索链接失效");
   normalize(g);
+  if(g.recommendationRank<0||g.recommendationRank>9999)throw bad("推荐优先级需为 0 至 9999；0 表示不置顶");
   if(g.published&&(g.name.isBlank()||g.description.isBlank()||g.iconUrl.isBlank()||g.heroUrl.isBlank()||g.downloadUrl.isBlank()))throw bad("发布前请填写游戏名称、详细介绍、图标、主视觉和下载链接");
   media.organize(g);
   String now=Instant.now().toString();g.createdAt=fresh?now:previous.get().createdAt;g.updatedAt=now;long oldRevision=g.revision;g.revision=oldRevision+1;

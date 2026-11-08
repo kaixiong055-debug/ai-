@@ -12,3 +12,6 @@
 @media(max-width:360px){.sidebar nav{gap:4px}.nav-item{min-width:0;padding:10px 7px;font-size:11px;gap:4px}}
 #catalog-jump{width:70px;padding:7px;border:1px solid #ded8e8;border-radius:8px}.filters select{max-width:100%}.filters .filter-meta{flex-basis:100%}.panel-heading .row-actions{flex-wrap:wrap}
 @media(max-width:600px){#filter-form select{flex:1 1 calc(50% - 12px);width:auto;min-width:0}#filter-form .search-input{flex-basis:100%}#filter-form>.button{width:100%}}
+/* Keep catalog search usable at desktop widths as filters grow. */
+#filter-form{flex-wrap:wrap}#filter-form .search-input{flex:1 1 260px;min-width:220px;width:auto}#filter-form select{flex:0 1 150px;min-width:130px}#filter-form .filter-meta{width:100%;flex:0 0 100%}.category-dialog{width:min(460px,calc(100% - 32px));border:1px solid #e1dbea;border-radius:18px;padding:24px;color:#30273f}.category-dialog::backdrop{background:#24183166}.category-dialog form{display:grid;gap:16px}.category-dialog p{overflow-wrap:anywhere}.category-dialog input{width:100%}.category-dialog h2{margin:0;font-size:22px}
+@media(max-width:600px){#filter-form .search-input{width:100%;min-width:0;flex-basis:100%}#filter-form select{flex:1 1 calc(50% - 12px);min-width:0}}

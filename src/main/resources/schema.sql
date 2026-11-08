@@ -18,3 +18,6 @@ ALTER TABLE cms_games ADD COLUMN IF NOT EXISTS excluded BOOLEAN NOT NULL DEFAULT
 ALTER TABLE cms_games ADD COLUMN IF NOT EXISTS catalog_ready BOOLEAN NOT NULL DEFAULT FALSE;
 CREATE INDEX IF NOT EXISTS cms_catalog_order ON cms_games(published,updated_at,id);
 CREATE INDEX IF NOT EXISTS cms_catalog_category ON cms_games(category,published);
+
+ALTER TABLE cms_games ADD COLUMN IF NOT EXISTS recommendation_rank INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX IF NOT EXISTS cms_recommendations ON cms_games(published,recommendation_rank);
