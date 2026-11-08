@@ -18,5 +18,5 @@ public class DemoSeed implements ApplicationRunner{
   for(int i=0;i<5;i++)game.screenshots.add(new Game.Picture(picture("shot-0"+(i+1)+".jpg"),labels[i]));
   game.published=false;games.save(game);
  }
- private String picture(String name)throws Exception{try(var in=new ClassPathResource("sample/"+name).getInputStream()){return media.store(in.readAllBytes(),name).url();}}
+ private String picture(String name)throws Exception{try(var in=new ClassPathResource("sample/"+name).getInputStream()){return media.store(in.readAllBytes(),name,"14545").url();}}
 }

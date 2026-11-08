@@ -36,7 +36,7 @@ public class ImportService {
      else if(lower.contains("简介"))game.description=content;
      else if(lower.contains("福利")&&!content.isBlank())game.benefits.add(new Game.Section("游戏福利",content));
     } else if(lower.matches(".*\\.(jpg|jpeg|png|gif)$")){
-     String url=media.store(a.bytes,a.name).url();
+     String url=media.store(a.bytes,a.name,game.id).url();
      if(lower.contains("icon")||lower.contains("图标")){if(game.iconUrl.isBlank())game.iconUrl=url;}
      else if(lower.contains("banner")||lower.contains("横幅")){if(game.heroUrl.isBlank())game.heroUrl=url;}
      else if(lower.contains("截图")||lower.contains("screenshot")){if(gallery.add(url))game.screenshots.add(new Game.Picture(url,game.name+"游戏画面 "+(gallery.size())));}

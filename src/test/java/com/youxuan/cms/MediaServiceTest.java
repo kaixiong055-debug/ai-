@@ -24,4 +24,21 @@ class MediaServiceTest {
   assertThatThrownBy(()->service.store("<svg onload='alert(1)'/>".getBytes(),"fake.png")).hasMessageContaining("图片");
   assertThatThrownBy(()->service.file("../../application.yml")).isInstanceOf(RuntimeException.class);
  }
+ @Test void separatesGamesAndNumbersImagesWithDeduplication()throws Exception {
+  var media=new MediaService(dir.toString());
+  assertThat(media.store(png(),"icon.png","14545").url()).isEqualTo("/media/14545/1.png");
+  assertThat(media.store(png(),"copy.png","14545").url()).isEqualTo("/media/14545/1.png");
+  assertThat(media.store(png(),"other.png","14604").url()).isEqualTo("/media/14604/1.png");
+  var out=new ByteArrayOutputStream();ImageIO.write(new BufferedImage(20,20,BufferedImage.TYPE_INT_RGB),"png",out);
+  assertThat(media.store(out.toByteArray(),"next.png","14545").url()).isEqualTo("/media/14545/2.png");
+  assertThat(media.file("14545/2.png")).exists();
+  assertThatThrownBy(()->media.store(png(),"x.png","../bad")).hasMessageContaining("游戏ID");
+ }
+ @Test void migrationPreservesOriginalBytesAndSharedLegacyUrls()throws Exception {
+  var media=new MediaService(dir.toString());String old=media.store(png(),"old.png").url();
+  assertThat(media.rehome("14545",old)).isEqualTo("/media/14545/1.png");
+  assertThat(media.rehome("14604",old)).isEqualTo("/media/14604/1.png");
+  assertThat(media.rehome("14545",old)).isEqualTo("/media/14545/1.png");
+  assertThat(Files.readAllBytes(media.file("14545/1.png"))).isEqualTo(Files.readAllBytes(media.file(old.substring(7))));
+ }
 }

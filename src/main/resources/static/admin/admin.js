@@ -121,10 +121,10 @@
   async function saveGame(mode){
     if(state.busy)return;if(state.uploads){notify('图片仍在上传，请等待完成后再保存。','error');return;}
     if(mode==='unpublish'&&!confirm('下线后公开页面将无法访问，并从站点地图移除。确定下线吗？'))return;
-    const game=readEditor();game.published=mode==='publish'?true:mode==='unpublish'?false:game.published;
+    const game=readEditor();const existing=Boolean(game.id);if(!game.id && game._uploadGameId)game.id=game._uploadGameId;game.published=mode==='publish'?true:mode==='unpublish'?false:game.published;
     state.busy=true;const unlock=lockForm($('#game-form'));
     try{
-      const saved=await api('/api/admin/games'+(game.id?'/'+encodeURIComponent(game.id):''),{method:game.id?'PUT':'POST',body:game});
+      const saved=await api('/api/admin/games'+(existing?'/'+encodeURIComponent(game.id):''),{method:existing?'PUT':'POST',body:game});
       state.game=saved;setDirty(false);renderEditor();setView('edit','编辑游戏');
       notify(mode==='unpublish'?'已下线为草稿。':saved.published?'已保存并发布，公开页面已更新。':'草稿已保存，可以打开预览查看效果。');
       $('#notice').scrollIntoView({block:'nearest',behavior:'smooth'});
@@ -145,7 +145,7 @@
   async function uploadImage(input){
     const file=input.files?.[0];if(!file)return;const target=document.getElementById(input.dataset.mediaInput);const button=$$('[data-upload]').find(item=>item.dataset.upload===input.dataset.mediaInput);
     if(!target)return;state.uploads++;if(button){button.disabled=true;button.textContent='上传中…';}
-    try{const form=new FormData();form.append('file',file);const result=await api('/api/admin/media',{method:'POST',body:form});target.value=result.url;target.dispatchEvent(new Event('input',{bubbles:true}));notify('图片已上传到服务器，保存游戏后生效。');}catch(error){report(error);}finally{state.uploads--;input.value='';if(button){button.disabled=false;button.textContent='上传图片';}}
+    try{const form=new FormData();form.append('file',file);if(!state.game.id&&!state.game._uploadGameId)state.game._uploadGameId=crypto.randomUUID();form.append('gameId',state.game.id||state.game._uploadGameId);const result=await api('/api/admin/media',{method:'POST',body:form});target.value=result.url;target.dispatchEvent(new Event('input',{bubbles:true}));notify('图片已上传到服务器，保存游戏后生效。');}catch(error){report(error);}finally{state.uploads--;input.value='';if(button){button.disabled=false;button.textContent='上传图片';}}
   }
   function renderImport(){
     content.innerHTML=`<div class="intro-row"><div><h2>把素材变成游戏页面</h2><p>上传游戏资料和素材包，自动建立可以继续编辑的草稿。</p></div></div><div class="import-layout"><section class="panel"><div class="panel-heading"><div><h2>JSON + ZIP 导入</h2><p>原有平台游戏列表 JSON 与对应游戏素材包。</p></div></div><div class="panel-body"><form id="import-form" class="stack"><label class="field">1 · 游戏资料 JSON<input id="import-json" type="file" name="json" accept=".json,.txt,application/json,text/plain" required><small>支持平台 result.data 格式和已整理的单游戏资料。</small></label><label class="field">2 · 选择对应游戏<select name="gameId" id="import-game-id" aria-label="对应游戏"><option value="">先选择 JSON 文件</option></select><small>JSON 内包含多款游戏时，请选中与素材包对应的一款。</small></label><label class="field">3 · 游戏素材 ZIP<input type="file" name="zip" accept=".zip,application/zip" required><small>按素材包目录识别图标、横幅、截图和介绍文字。</small></label><div class="form-note">图片会保存到服务器。ZIP 内视频不导入，请在游戏编辑页填写视频直链。导入先保存为草稿，预览满意后再发布。</div><button type="submit" class="button primary">导入并创建草稿 →</button><div id="import-status" class="import-status" role="status" hidden></div></form></div></section><section class="panel import-steps"><span class="eyebrow">HOW IT WORKS</span><div class="import-step"><span class="step-number">1</span><div><h3>提供真实资料</h3><p>名称、介绍与推广链接来自 JSON，图片和说明来自素材包。</p></div></div><div class="import-step"><span class="step-number">2</span><div><h3>检查草稿</h3><p>调整文案和图片顺序，补充视频链接，按需自定义 SEO。</p></div></div><div class="import-step"><span class="step-number">3</span><div><h3>发布独立页面</h3><p>每个游戏一个页面地址，发布后进入首页与站点地图。</p></div></div></section></div>`;

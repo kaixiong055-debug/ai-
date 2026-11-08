@@ -13,8 +13,8 @@ import java.util.*;
 
 @Service
 public class GameService {
- private final JdbcTemplate db;private final ObjectMapper json;
- public GameService(JdbcTemplate db,ObjectMapper json){this.db=db;this.json=json;}
+ private final JdbcTemplate db;private final ObjectMapper json;private final MediaService media;
+ public GameService(JdbcTemplate db,ObjectMapper json,MediaService media){this.db=db;this.json=json;this.media=media;}
  public List<Game> list(String q,String status){
   String needle=q==null?"":q.trim().toLowerCase(Locale.ROOT);
   if(!Set.of("","published","draft").contains(status==null?"":status))throw bad("无效的发布状态");
@@ -36,6 +36,7 @@ public class GameService {
   if(locked&&!g.slug.equals(previous.get().slug))throw conflict("首次发布后 URL 已锁定，避免搜索链接失效");
   normalize(g);
   if(g.published&&(g.name.isBlank()||g.description.isBlank()||g.iconUrl.isBlank()||g.heroUrl.isBlank()||g.downloadUrl.isBlank()))throw bad("发布前请填写游戏名称、详细介绍、图标、主视觉和下载链接");
+  media.organize(g);
   String now=Instant.now().toString();g.createdAt=fresh?now:previous.get().createdAt;g.updatedAt=now;long oldRevision=g.revision;g.revision=oldRevision+1;
   try{
    if(fresh)db.update("INSERT INTO cms_games(id,slug,payload,published,slug_locked,revision,updated_at) VALUES(?,?,?,?,?,?,?)",g.id,g.slug,write(g),g.published,g.published,g.revision,now);

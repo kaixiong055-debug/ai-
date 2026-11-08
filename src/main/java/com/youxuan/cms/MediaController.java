@@ -12,10 +12,11 @@ import java.time.Duration;
 public class MediaController {
  private final MediaService media;
  public MediaController(MediaService media){this.media=media;}
- @PostMapping("/api/admin/media") public MediaService.Upload upload(@RequestParam("file") MultipartFile file)throws IOException{
+ @PostMapping("/api/admin/media") public MediaService.Upload upload(@RequestParam("file") MultipartFile file,@RequestParam("gameId") String gameId)throws IOException{
   if(file.getSize()>MediaService.MAX_IMAGE_BYTES)throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"图片不能超过 12MB");
-  return media.store(file.getBytes(),file.getOriginalFilename());
+  return media.store(file.getBytes(),file.getOriginalFilename(),gameId);
  }
+ @GetMapping("/media/{gameId}/{name}") public ResponseEntity<Resource> grouped(@PathVariable String gameId,@PathVariable String name){return file(gameId+"/"+name);}
  @GetMapping("/media/{name}") public ResponseEntity<Resource> file(@PathVariable String name){
   return ResponseEntity.ok().cacheControl(CacheControl.maxAge(Duration.ofDays(365)).cachePublic().immutable())
    .contentType(name.endsWith(".jpg")?MediaType.IMAGE_JPEG:MediaType.IMAGE_PNG).header("X-Content-Type-Options","nosniff")

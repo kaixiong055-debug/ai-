@@ -18,7 +18,7 @@ public final class UrlPolicy {
    return value;
   }catch(IllegalArgumentException e){throw invalid();}
  }
- public static String media(String input){String value=input==null?"":input.trim();if(value.startsWith("/media/")&&value.matches("/media/[A-Za-z0-9_-]+\\.(jpg|jpeg|png|webp|gif)"))return value;return external(value);}
+ public static String media(String input){String value=input==null?"":input.trim();if(value.startsWith("/media/")&&value.matches("/media/(?:[A-Za-z0-9_-]+|[A-Za-z0-9_-]{1,100}/[1-9][0-9]*)\\.(jpg|jpeg|png|webp|gif)"))return value;return external(value);}
  public static String site(String input){String value=external(input);if(value.isEmpty())return value;URI uri=URI.create(value);if(uri.getRawQuery()!=null||uri.getRawFragment()!=null||!(uri.getRawPath().isEmpty()||uri.getRawPath().equals("/")))throw new ResponseStatusException(HttpStatus.BAD_REQUEST,"网站域名只能填写 HTTPS 根域名，例如 https://game.example.com");return value.replaceAll("/+$","");}
  private static ResponseStatusException invalid(){return new ResponseStatusException(HttpStatus.BAD_REQUEST,"链接必须是有效的 HTTPS 地址；图片也可使用已上传的 /media/ 文件地址");}
 }
